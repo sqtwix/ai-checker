@@ -1,11 +1,13 @@
 from openai import OpenAI
 
+# ========================= Agent Client ========================= 
+
 # AgentClient - class, that present an Agent.
 # AgnetClient class contains a basic constructor
 # and execute method that used to get data from
 # model API (DeepSeek and Sber GPT)
 
-# DeepSeek JSON-fromat:
+# ========================= DeepSeek JSON-fromat ========================= :
 # {
 # "model": "deepseek-v4-pro",
 #         "messages": [
@@ -17,7 +19,7 @@ from openai import OpenAI
 #         "stream": false
 #       }'
 
-# Sber GPT JSON-fromat
+# ========================= Sber GPT JSON-fromat ========================= 
 # {
 #   "model": "GigaChat-2-Max",
 #   "messages": [
@@ -25,27 +27,12 @@ from openai import OpenAI
 #       "role": "user",
 #       "content": "Создай профиль пользователя для Ивана, 30 лет, локация Москва."
 #     }
-#   ],
-#   "response_format": {
-#     "type": "json_schema",
-#     "json_schema": {
-#       "name": "user_profile",
-#       "strict": true,
-#       "schema": {
-#         "type": "object",
-#         "properties": {
-#           "name": { "type": "string" },
-#           "age": { "type": "integer" },
-#           "city": { "type": "string" }
-#         },
-#         "required": ["name", "age", "city"],
-#         "additionalProperties": false
-#       }
-#     }
-#   }
+#   ]
 # }
 
 # In this class, we use a general JSON-format
+
+# ========================= General JSON-Format ========================= 
 # {
 #     model: "Model",
 #     messages: [
@@ -81,6 +68,3 @@ class AgentClient:
             return response.choices[0].message.content
         except Exception as e:
             raise Exception("AgentClient Execution Exception: prompt execution failed - " + e.__str__())
-        
-    def get_agent_model_type(self) -> str:
-        return self.model;

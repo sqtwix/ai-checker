@@ -1,9 +1,23 @@
 from AgentClient import AgentClient
 import os
 
+# ========================= Agent Factory ========================= 
+
+# AgentFactory - class, that used to create a queue of agents
+# that class provide a static method, which creates th Agents Queue
+# thats will be operate by AgentManager
+
+# AgentManager will get Agents from factory and call execute metod from AgentClient
+# AgentFactory can create both groups of Agent (DeepSeek and SberGpt)
+
+# DeepSeek use DEEPSEEK_ global variables from dotenv
+# SberGpt use SBERGPT_ global variables from dotenv
+
 class AgentFactory:
-    @staticmethod
-    def create_queue(model: str) -> list[AgentClient] :
+    def __init__(self):
+        ...
+
+    def create_queue(model: str, self) -> list[AgentClient] :
         queue : list[AgentClient] = []
         specializations = [
             "main-analyzer",
