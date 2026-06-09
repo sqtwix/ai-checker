@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using ApiCore.Services;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ApiCore.Controllers;
 
@@ -12,6 +13,12 @@ namespace ApiCore.Controllers;
 [Route("api/v1/analysis")]
 public class AnalysisController : ControllerBase
 {
+    private readonly AnalysisService _analysisService;
+
+    public AnalysisController(AnalysisService analysisService) { 
+        _analysisService = analysisService;
+    }
+
     [HttpPost("upload")]
     [DisableRequestSizeLimit] // Чтобы методисты могли загружать тяжелые CSV/архивы
     public async Task<IActionResult> UploadFiles(
@@ -30,9 +37,13 @@ public class AnalysisController : ControllerBase
         var taskId = Guid.NewGuid().ToString();
 
         // 3. Отдаем парсинг и отправку в фоновый сервис, чтобы не блокировать фронтенд
-        // _analysisService.StartBackgroundAnalysis(taskId, benchmarkFile, userResponseFiles, modelType);
+        await _analysisService.ProcessAnalysisAsync(taskId, benchmarkFile, userResponseFiles, modelType);
 
         // Возвращаем фронту ID задачи. Фронт начнет слушать WebSocket/SignalR с этим ID
-        return Accepted(new { task_id = taskId, message = "Файлы успешно загружены и приняты в обработку." });
+        return Accepted(new
+        {
+            task_id = taskId,
+            message = "Файлы успешно прошли первичную валидацию и приняты в обработку ИИ-агентами."
+        });
     }
 }

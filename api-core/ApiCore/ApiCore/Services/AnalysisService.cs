@@ -1,4 +1,6 @@
 ﻿using ApiCore.Models;
+using System.Text;
+using System.Text.Json;
 
 namespace ApiCore.Services;
 /*
@@ -38,12 +40,30 @@ public class AnalysisService
                 return;
             }
 
+            // 2. Парсинг файла
             _logger.LogInformation($"[Task {taskId}] Запуск циклического парсинга CSV файлов...");
             CourseBatchAnalysisRequest payload = _fileParser.ParseToBatchRequest(benchmarkFile, userResponseFiles);
-            payload.BatchId = taskId; // Привязываем сгенерированный контроллером ID задачи
+            payload.BatchId = taskId;
 
-            // TODO: Шаг 3. Отправка контракта по HTTP в Python ai-driver
-            _logger.LogInformation($"[Task {taskId}] Запрос отправлен в ai-driver. Ожидание вебхука...");
+            // 3. Отправка JSON-контракта в Python AI-Driver
+            _logger.LogInformation($"[Task {taskId}] Парсинг завершен. Отправка контракта в ai-driver...");
+
+            var jsonSerializerOptions = new JsonSerializerOptions { WriteIndented = false };
+            string jsonString = JsonSerializer.Serialize(payload, jsonSerializerOptions);
+            var httpContent = new StringContent(jsonString, Encoding.UTF8, "application/json");
+
+            // Отправляем POST запрос в сервис ai-driver (url берется из конфига docker-compose)
+            var response = await _httpClient.PostAsync("http://ai-driver:8000/api/v1/analyze", httpContent);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation($"[Task {taskId}] Данные успешно доставлены в ai-driver. Переходим в режим ожидания вебхука.");
+            }
+            else
+            {
+                string errorContext = await response.Content.ReadAsStringAsync();
+                _logger.LogError($"[Task {taskId}] ai-driver вернул ошибку: {response.StatusCode}. Контекст: {errorContext}");
+            }
         }
         catch (Exception ex)
         {

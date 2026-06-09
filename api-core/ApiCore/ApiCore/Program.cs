@@ -1,3 +1,5 @@
+using ApiCore.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -5,6 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+// Adding services for DI realization
+builder.Services.AddSingleton<ValidationService>();
+builder.Services.AddScoped<AnalysisService>();
+builder.Services.AddScoped<FileParser>();
 
 var app = builder.Build();
 
