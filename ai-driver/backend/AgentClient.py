@@ -56,11 +56,15 @@ from openai import OpenAI
 # }
 
 class AgentClient:
-    def __init__(api_key: str, base_url: str, model: str,  self):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+    def __init__(api_key: str, base_url: str, model: str, specialization: str, self):
+        try:
+            self.api_key = api_key
+            self.base_url = base_url
+            self.model = model
+            self.specialization = specialization
+            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        except Exception as e:
+            raise Exception("AgentClient Initialization Exception: agent initialization failed - " + e.__str__())
 
     def execute(system_prompt: str, user_prompt: str, self) -> any:
         try:
@@ -76,7 +80,7 @@ class AgentClient:
 
             return response.choices[0].message.content
         except Exception as e:
-            raise Exception("AgentClient Execution Exception: Prompt execution failed")
+            raise Exception("AgentClient Execution Exception: prompt execution failed - " + e.__str__())
         
     def get_agent_model_type(self) -> str:
         return self.model;

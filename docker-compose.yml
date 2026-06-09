@@ -8,6 +8,7 @@ services:
     # Передаем API-ключ из твоей операционной системы внутрь контейнера
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - SBERGPT_API_KEY=${SBERGPT_API_KEY}
     # Подключаем к общей внутренней сети проекта
     networks:
       - saas-network
