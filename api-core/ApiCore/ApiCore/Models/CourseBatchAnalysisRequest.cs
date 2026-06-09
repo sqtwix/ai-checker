@@ -1,6 +1,10 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace ApiCore.Models.Shared;
+namespace ApiCore.Models;
+/*
+ Набор классов, которые представляют JSON файл, 
+ который отправляется в AI driver
+ */
 
 public class CourseBatchAnalysisRequest
 {

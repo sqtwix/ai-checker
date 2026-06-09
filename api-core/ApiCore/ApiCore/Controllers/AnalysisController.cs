@@ -15,7 +15,7 @@ public class AnalysisController : ControllerBase
     [HttpPost("upload")]
     [DisableRequestSizeLimit] // Чтобы методисты могли загружать тяжелые CSV/архивы
     public async Task<IActionResult> UploadFiles(
-        [FromForm] IFormFile benchmarkFile,        // Тот самый эталонный файл (JSON/CSV) [cite: 9, 18]
+        [FromForm] IFormFile benchmarkFile,        // Эталонный файл (JSON/CSV) [cite: 9, 18]
         [FromForm] List<IFormFile> userResponseFiles, // Массив файлов с реальными ответами студентов [cite: 10, 18]
         [FromForm] string modelType = "deepseek")  // Выбор нейросети (deepseek или gigachat) [cite: 17, 53]
     {
