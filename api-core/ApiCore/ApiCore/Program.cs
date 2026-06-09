@@ -15,13 +15,22 @@ builder.Services.AddScoped<FileParser>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+
+// Настройка конвейера HTTP-запросов
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi(); // Отдает JSON
+
+    // Подключаем визуальный интерфейс SwaggerUI к JSON-файлу от .NET 9
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/openapi/v1.json", "OpenAPI v1");
+        options.RoutePrefix = "swagger"; // Страница будет доступна по адресу /swagger
+    });
 }
 
-app.UseHttpsRedirection();
+// Закомментируем для Docker, чтобы избежать бесконечного редиректа на нерабочий HTTPS-порт
+// app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
