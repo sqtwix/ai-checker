@@ -1,9 +1,10 @@
 from pydantic import BaseModel
 
-# Схема выходных данных (то, что ИИ обязан вернуть строго по структуре)
+from MainAnalysis import MainAnalysis
+from AnomalyAnalysis import AnomalyAnalysis
+from StatisticsAnalysis import StatisticsAnalysis
+
 class AnalysisResponse(BaseModel):
-    is_correct: bool
-    score_percent: int
-    logic_difference: str
-    time_anomaly_detected: bool
-    time_verdict: str
+    main_analysis : MainAnalysis
+    AnomalyAnalysis : AnomalyAnalysis
+    statistics_analysis : StatisticsAnalysis
