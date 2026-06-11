@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "Fx7FOtp90JI=",
+  "dgSpecHash": "gcTCoPiyClc=",
   "success": true,
   "projectFilePath": "C:\\Users\\ivan2\\ai-checker\\api-core\\ApiCore\\ApiCore\\ApiCore.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\ivan2\\.nuget\\packages\\microsoft.aspnetcore.openapi\\9.0.10\\microsoft.aspnetcore.openapi.9.0.10.nupkg.sha512",
-    "C:\\Users\\ivan2\\.nuget\\packages\\microsoft.openapi\\1.6.17\\microsoft.openapi.1.6.17.nupkg.sha512"
+    "C:\\Users\\ivan2\\.nuget\\packages\\microsoft.openapi\\1.6.17\\microsoft.openapi.1.6.17.nupkg.sha512",
+    "C:\\Users\\ivan2\\.nuget\\packages\\swashbuckle.aspnetcore.swaggerui\\9.0.6\\swashbuckle.aspnetcore.swaggerui.9.0.6.nupkg.sha512"
   ],
   "logs": []
 }

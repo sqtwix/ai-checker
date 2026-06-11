@@ -1,39 +1,88 @@
 using ApiCore.Services;
+using Microsoft.OpenApi.Models; // Добавить этот using
+using Microsoft.OpenApi.Any;    // Добавить этот using
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
 builder.Services.AddControllers();
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
 
-// Adding services for DI realization
+// Настраиваем генератор OpenAPI .NET 9 через OperationTransformer
+builder.Services.AddOpenApi(options =>
+{
+    options.AddOperationTransformer((operation, context, cancellationToken) =>
+    {
+        // Находим нашу ручку загрузки файлов по её относительному пути
+        if (context.Description.RelativePath != null &&
+            context.Description.RelativePath.Contains("api/v1/analysis/upload", StringComparison.OrdinalIgnoreCase))
+        {
+            // Инициализируем RequestBody и полностью очищаем дефолтно сгенерированный мусор
+            operation.RequestBody ??= new OpenApiRequestBody();
+            operation.RequestBody.Content.Clear();
+
+            // Создаем чистую, правильную схему для формы multipart/form-data
+            var formSchema = new OpenApiSchema
+            {
+                Type = "object",
+                Required = new HashSet<string> { "benchmarkFile", "userResponseFiles" }
+            };
+
+            // 1. Поле для одиночного эталонного файла (мапим в тип string с форматом binary)
+            formSchema.Properties.Add("benchmarkFile", new OpenApiSchema
+            {
+                Type = "string",
+                Format = "binary",
+                Description = "Эталонный файл с ответами курса (.csv / .json)"
+            });
+
+            // 2. Поле для массива файлов с ответами студентов (массив строк с форматом binary)
+            formSchema.Properties.Add("userResponseFiles", new OpenApiSchema
+            {
+                Type = "array",
+                Items = new OpenApiSchema
+                {
+                    Type = "string",
+                    Format = "binary"
+                },
+                Description = "Массив файлов с реальными ответами студентов"
+            });
+
+            // 3. Поле для выбора модели нейросети с дефолтным значением
+            formSchema.Properties.Add("modelType", new OpenApiSchema
+            {
+                Type = "string",
+                Default = new OpenApiString("deepseek"),
+                Description = "Модель ИИ (deepseek или gigachat)"
+            });
+
+            // Записываем собранный multipart/form-data в контракт операции
+            operation.RequestBody.Content.Add("multipart/form-data", new OpenApiMediaType
+            {
+                Schema = formSchema
+            });
+        }
+
+        return Task.CompletedTask;
+    });
+});
+
+// Регистрация сервисов в DI
 builder.Services.AddSingleton<ValidationService>();
-builder.Services.AddScoped<AnalysisService>();
 builder.Services.AddScoped<FileParser>();
+builder.Services.AddHttpClient<AnalysisService>();
 
 var app = builder.Build();
 
-
-// ��������� ��������� HTTP-��������
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi(); // ������ JSON
+    app.MapOpenApi();
 
-    // ���������� ���������� ��������� SwaggerUI � JSON-����� �� .NET 9
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/openapi/v1.json", "OpenAPI v1");
-        options.RoutePrefix = "swagger"; // �������� ����� �������� �� ������ /swagger
+        options.RoutePrefix = "swagger";
     });
 }
 
-// �������������� ��� Docker, ����� �������� ������������ ��������� �� ��������� HTTPS-����
-// app.UseHttpsRedirection();
-
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();

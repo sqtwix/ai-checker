@@ -11,8 +11,22 @@ services:
     # Подключаем к общей внутренней сети проекта
     networks:
       - saas-network
+    
+  api-core:
+    build:
+      context: ./api-core/ApiCore/ApiCore
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development  
+      - ConnectionStrings__Redis=redis:6379
+      - AiDriver__Url=http://ai-driver:8000
+    depends_on:
+      - redis
+    networks:
+      - saas-network
 
-  # Кэш и очередь задач для api-core (согласно архитектурной схеме)
+  # Кэш и очередь задач для api-core
   redis:
     image: redis:7-alpine
     ports:

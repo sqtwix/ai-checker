@@ -1,2 +1,10 @@
 # env
-.env
+*.env
+
+# building .net files
+/bin
+*.bin
+/obj
+*.obj
+*.vs
+
