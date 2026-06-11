@@ -1,0 +1,17 @@
+{
+    "system_prompts" : 
+    [
+        {
+            "specialization" : "main-analyzer",
+            "prompt" : "prompt"
+        },
+        {
+            "specialization" : "anomalies-analyzer",
+            "prompt" : "prompt"
+        },
+        {
+            "specialization" : "statistics-summarizer",
+            "prompt" : "prompt"
+        }
+    ]
+}
