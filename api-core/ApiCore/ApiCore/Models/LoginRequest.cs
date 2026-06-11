@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace ApiCore.Services;
+namespace ApiCore.Models;
 
 public class LoginRequest
 {

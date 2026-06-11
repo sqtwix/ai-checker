@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace ApiCore.Services;
+namespace ApiCore.Models;
 
 public class AuthResponse
 {
