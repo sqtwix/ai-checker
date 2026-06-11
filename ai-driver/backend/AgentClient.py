@@ -43,7 +43,7 @@ from openai import OpenAI
 # }
 
 class AgentClient:
-    def __init__(api_key: str, base_url: str, model: str, specialization: str, self):
+    def __init__(self, api_key: str, base_url: str, model: str, specialization: str):
         try:
             self.api_key = api_key
             self.base_url = base_url
@@ -53,7 +53,7 @@ class AgentClient:
         except Exception as e:
             raise Exception("AgentClient Initialization Exception: agent initialization failed - " + e.__str__())
 
-    def execute(system_prompt: str, user_prompt: str, self) -> any:
+    def execute(self, system_prompt: str, user_prompt: str) -> any:
         try:
             response = self.client.chat.completions.create(
                 model = self.model,

@@ -23,7 +23,7 @@ import concurrent.futures
 
 
 class AgentManager:
-    def __init__(agent_factory : AgentFactory, self):
+    def __init__(self, agent_factory : AgentFactory):
         try:
             self.agent_factory = agent_factory
             self.deepseek_queue = self.agent_factory.create_queue("deepseek")
@@ -62,7 +62,7 @@ class AgentManager:
         except Exception as e:
             raise Exception("DeepSeek Processing Error: " + e.__str__())
 
-    def start_sbergpt_processing(input_data : str, self):
+    def start_sbergpt_processing(self, input_data : str):
         try:
             specializations = [
                 "main-analyzer",

@@ -17,7 +17,7 @@ class AgentFactory:
     def __init__(self):
         ...
 
-    def create_queue(model: str, self) -> list[AgentClient] :
+    def create_queue(self, model: str) -> list[AgentClient] :
         queue : list[AgentClient] = []
         specializations = [
             "main-analyzer",
