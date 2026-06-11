@@ -1,4 +1,4 @@
-from AgentClient import AgentClient
+from agent_client import AgentClient
 import os
 
 # ========================= Agent Factory ========================= 

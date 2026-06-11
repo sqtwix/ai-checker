@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 
-from MainAnalysis import MainAnalysis
-from AnomalyAnalysis import AnomalyAnalysis
-from StatisticsAnalysis import StatisticsAnalysis
+from main_analysis import MainAnalysis
+from anomaly_analysis import AnomalyAnalysis
+from statistics_analysis import StatisticsAnalysis
 
 class AnalysisResponse(BaseModel):
     main_analysis : MainAnalysis

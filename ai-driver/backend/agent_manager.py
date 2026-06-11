@@ -1,5 +1,5 @@
-from AgentClient import AgentClient
-from AgentFactory import AgentFactory
+from agent_client import AgentClient
+from agent_factory import AgentFactory
 import json
 import concurrent.futures
 
@@ -34,7 +34,7 @@ class AgentManager:
         except Exception as e:
             raise Exception("Agent Manager Initialization Error: " + e.__str__())
 
-    def start_deepseek_processing(input_data : str, self) -> str:
+    def start_deepseek_processing(self, input_data : str) -> str:
         try:
             specializations = [
                 "main-analyzer",
