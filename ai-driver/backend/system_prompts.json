@@ -1,0 +1,14 @@
+[
+    {
+        "specialization" : "main-analyzer",
+        "prompt" : "main-analyzer-prompt"
+    },
+    {
+        "specialization" : "anomalies-analyzer",
+        "prompt" : "anomalies-analyzer-prompt"
+    },
+    {
+        "specialization" : "statistics-summarizer",
+        "prompt" : "statistics-summarizer-prompt"
+    }
+]
