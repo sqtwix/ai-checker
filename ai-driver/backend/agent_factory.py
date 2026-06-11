@@ -1,4 +1,4 @@
-from agent_client import AgentClient
+from backend.agent_client import AgentClient
 import os
 
 # ========================= Agent Factory ========================= 
@@ -25,16 +25,20 @@ class AgentFactory:
             "statistics-summarizer"
         ]
 
+        api_key : str = None
+        base_url : str = None
+        agent_model : str = None
+
         match model:
             case "deepseek":
-                    api_key : str = os.getenv("DEEPSEEK_API_KEY")
-                    base_url : str = os.getenv("DEEPSEEK_BASE_URL")
-                    agent_model : str = os.getenv("DEEPSEEK_MODEL")
+                    api_key = os.getenv("DEEPSEEK_API_KEY")
+                    base_url = os.getenv("DEEPSEEK_BASE_URL")
+                    agent_model = os.getenv("DEEPSEEK_MODEL")
                 
             case "sbergpt":
-                    api_key : str = os.getenv("SBERGPT_API_KEY")
-                    base_url : str = os.getenv("SBERGPT_BASE_URL")
-                    agent_model : str = os.getenv("SBERGPT_MODEL")
+                    api_key = os.getenv("SBERGPT_API_KEY")
+                    base_url = os.getenv("SBERGPT_BASE_URL")
+                    agent_model = os.getenv("SBERGPT_MODEL")
 
         try:
             for specialization in specializations:

@@ -43,11 +43,11 @@ from openai import OpenAI
 # }
 
 class AgentClient:
-    def __init__(self, api_key: str, base_url: str, model: str, specialization: str):
+    def __init__(self, api_key: str, base_url: str, agent_model: str, specialization: str):
         try:
             self.api_key = api_key
             self.base_url = base_url
-            self.model = model
+            self.model = agent_model
             self.specialization = specialization
             self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         except Exception as e:

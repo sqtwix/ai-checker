@@ -2,18 +2,14 @@ services:
   ai-driver:
     build:
       context: ./ai-driver
-    # Пробрасываем порт 8000 из контейнера на твой компьютер
     ports:
       - "8000:8000"
-    # Передаем API-ключ из твоей операционной системы внутрь контейнера
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - SBERGPT_API_KEY=${SBERGPT_API_KEY}
-    # Подключаем к общей внутренней сети проекта
     networks:
       - saas-network
 
-  # Кэш и очередь задач для api-core (согласно архитектурной схеме)
   redis:
     image: redis:7-alpine
     ports:

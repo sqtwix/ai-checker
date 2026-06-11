@@ -1,7 +1,8 @@
-from agent_client import AgentClient
-from agent_factory import AgentFactory
+from backend.agent_client import AgentClient
+from backend.agent_factory import AgentFactory
 import json
 import concurrent.futures
+from pathlib import Path
 
 # ========================= Agent Manager ========================= 
 
@@ -21,6 +22,8 @@ import concurrent.futures
 # that returns data from model api
 # that realization will provide more fast data transfers 
 
+BASE_DIR = Path(__file__).resolve().parent
+PATH_TO_JSON = BASE_DIR / "system_prompts.json"
 
 class AgentManager:
     def __init__(self, agent_factory : AgentFactory):
@@ -28,7 +31,7 @@ class AgentManager:
             self.agent_factory = agent_factory
             self.deepseek_queue = self.agent_factory.create_queue("deepseek")
             self.sbergpt_queue = self.agent_factory.create_queue("sbergpt")
-            with open("system_prompts.json", "r") as f:
+            with open(PATH_TO_JSON, "r") as f:
                 row_context = f.read()
                 self.system_prompts = json.loads(row_context)
         except Exception as e:
