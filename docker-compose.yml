@@ -1,38 +1,61 @@
+version: '3.8'
+
 services:
-  ai-driver:
-    build:
-      context: ./ai-driver
-    # Пробрасываем порт 8000 из контейнера на твой компьютер
-    ports:
-      - "8000:8000"
-    # Передаем API-ключ из твоей операционной системы внутрь контейнера
-    environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    # Подключаем к общей внутренней сети проекта
-    networks:
-      - saas-network
-    
   api-core:
     build:
       context: ./api-core/ApiCore/ApiCore
     ports:
       - "5000:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development  
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
       - ConnectionStrings__Redis=redis:6379
+      - JwtSettings__Secret=${JWT_SECRET}
+      - JwtSettings__Issuer=${JWT_ISSUER}
+      - JwtSettings__Audience=${JWT_AUDIENCE}
+      - JwtSettings__ExpiryMinutes=${JWT_EXPIRY_MINUTES}
       - AiDriver__Url=http://ai-driver:8000
     depends_on:
+      - postgres
       - redis
     networks:
       - saas-network
 
-  # Кэш и очередь задач для api-core
+  postgres:
+    image: postgres:15-alpine
+    container_name: aichecker-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - saas-network
+
+  # 3. Наш ИИ-драйвер на FastAPI
+  ai-driver:
+    build:
+      context: ./ai-driver
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    networks:
+      - saas-network
+
+  # 4. Redis
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     networks:
       - saas-network
+
+volumes:
+  postgres_data:
 
 networks:
   saas-network:

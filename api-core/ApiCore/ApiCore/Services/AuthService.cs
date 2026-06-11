@@ -1,57 +1,62 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
+﻿using ApiCore.Data;
 using ApiCore.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace ApiCore.Services;
 
 public class AuthService
 {
     private readonly IConfiguration _configuration;
+    private readonly AppDbContext _context;
     private readonly PasswordHasher<string> _passwordHasher = new();
 
-    // Временная in-memory база данных пользователей для тестов MVP. 
-    // Как только подключишь Postgres, этот список заменится на DbContext.
-    private static readonly List<User> _usersDb = new();
-
-    public AuthService(IConfiguration configuration)
+    public AuthService(IConfiguration configuration, AppDbContext context)
     {
         _configuration = configuration;
+        _context = context;
     }
 
     public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
     {
-        // Проверяем, не занято ли имя пользователя
-        if (_usersDb.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
+        // Проверяем асинхронно, занято ли имя пользователя ИЛИ почта
+        var userExists = await _context.Users
+            .AnyAsync(u => u.Username.ToLower() == request.Username.ToLower()
+                        || u.Email.ToLower() == request.Email.ToLower());
+
+        if (userExists)
         {
-            return null; // Или выбросить кастомное исключение
+            return null; 
         }
 
         var newUser = new User
         {
             Id = Guid.NewGuid(),
             Username = request.Username,
-            // Хэшируем пароль перед сохранением (Критически важно для безопасности!)
+            Email = request.Email,
             PasswordHash = _passwordHasher.HashPassword(request.Username, request.Password)
         };
 
-        _usersDb.Add(newUser);
+        await _context.Users.AddAsync(newUser);
+        await _context.SaveChangesAsync();
 
-        // После регистрации автоматически генерируем токен, чтобы пользователю не нужно было логиниться
         var token = GenerateJwtToken(newUser);
-
         return new AuthResponse { Token = token, Username = newUser.Username };
     }
 
     public async Task<AuthResponse?> LoginAsync(LoginRequest request)
     {
-        // Ищем пользователя в базе
-        var user = _usersDb.FirstOrDefault(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase));
+        // Ищем пользователя в БД по имени
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Username.ToLower() == request.Username.ToLower());
+
         if (user == null) return null;
 
-        // Проверяем соответствие сырого пароля сохраненному хэшу
         var verificationResult = _passwordHasher.VerifyHashedPassword(user.Username, user.PasswordHash, request.Password);
         if (verificationResult == PasswordVerificationResult.Failed)
         {
@@ -68,12 +73,13 @@ public class AuthService
         var secretKey = jwtSettings["Secret"] ?? throw new InvalidOperationException("JWT Secret is missing.");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
 
-        // Полезная нагрузка токена (Claims) — данные, которые зашиты внутри токена
+        // Полезная нагрузка токена (Claims)
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, "Methodist") // Роль по умолчанию для твоего ТЗ
+            new Claim(ClaimTypes.Email, user.Email), // Добавили Claim с почтой внутрь токена!
+            new Claim(ClaimTypes.Role, "Methodist")
         };
 
         var signingCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

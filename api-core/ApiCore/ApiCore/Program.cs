@@ -1,8 +1,13 @@
+using ApiCore.Data;
 using ApiCore.Services;
-using Microsoft.OpenApi.Models; // Добавить этот using
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Any;
+using Microsoft.OpenApi.Models; // Добавить этот using
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddControllers();
 
@@ -81,6 +86,12 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/openapi/v1.json", "OpenAPI v1");
         options.RoutePrefix = "swagger";
     });
+}
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    dbContext.Database.EnsureCreated();
 }
 
 app.UseAuthorization();

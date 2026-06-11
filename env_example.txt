@@ -1,1 +1,12 @@
-DEEPSEEK_API_KEY="ваш_ключь"
+# НАСТРОЙКИ POSTGRESQL
+DB_HOST=postgres
+DB_PORT=port
+DB_NAME=aichecker_db
+DB_USER=postgres
+DB_PASSWORD=password
+
+# НАСТРОЙКИ JWT 
+JWT_SECRET=secret_key
+JWT_ISSUER=issuer
+JWT_AUDIENCE=audience
+JWT_EXPIRY_MINUTES=60
