@@ -1,6 +1,6 @@
 using ApiCore.Services;
 using Microsoft.OpenApi.Models; // Добавить этот using
-using Microsoft.OpenApi.Any;    // Добавить этот using
+using Microsoft.OpenApi.Any;
 
 var builder = WebApplication.CreateBuilder(args);
 

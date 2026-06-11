@@ -1,5 +1,5 @@
-﻿using System.Text;
-using ApiCore.Models;
+﻿using ApiCore.Models;
+using System.Text;
 
 namespace ApiCore.Services;
 
