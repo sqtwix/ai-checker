@@ -66,6 +66,17 @@ builder.Services.AddOpenApi(options =>
             });
         }
 
+        options.AddDocumentTransformer((document, context, cancellationToken) =>
+        {
+            document.Servers.Clear();
+            document.Servers.Add(new OpenApiServer
+            {
+                Url = "http://localhost:5000",
+                Description = "Локальный Docker контейнер"
+            });
+            return Task.CompletedTask;
+        });
+
         return Task.CompletedTask;
     });
 });
@@ -73,6 +84,7 @@ builder.Services.AddOpenApi(options =>
 // Регистрация сервисов в DI
 builder.Services.AddSingleton<ValidationService>();
 builder.Services.AddScoped<FileParser>();
+builder.Services.AddScoped<AuthService>();
 builder.Services.AddHttpClient<AnalysisService>();
 
 var app = builder.Build();

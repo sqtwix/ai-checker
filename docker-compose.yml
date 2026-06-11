@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api-core:
     build:
@@ -16,8 +14,8 @@ services:
       - JwtSettings__ExpiryMinutes=${JWT_EXPIRY_MINUTES}
       - AiDriver__Url=http://ai-driver:8000
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
     networks:
       - saas-network
 
@@ -32,10 +30,14 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s  # Проверять каждые 3 секунды
+      timeout: 3s   # Таймаут на ответ
+      retries: 10   # Сколько раз пытаться до того, как признать контейнер упавшим
     networks:
       - saas-network
 
-  # 3. Наш ИИ-драйвер на FastAPI
   ai-driver:
     build:
       context: ./ai-driver
@@ -46,7 +48,6 @@ services:
     networks:
       - saas-network
 
-  # 4. Redis
   redis:
     image: redis:7-alpine
     ports:

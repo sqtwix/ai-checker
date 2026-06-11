@@ -18,7 +18,7 @@ public class RegisterRequest
     [Required]
     [EmailAddress(ErrorMessage = "Невалидный формат почты")]
     [JsonPropertyName("email")]
-    public string Email { get; set; }
+    public string Email { get; set; } = string.Empty;
 
     [Required]
     [MinLength(6, ErrorMessage = "Пароль должен быть не менее 6 символов.")]

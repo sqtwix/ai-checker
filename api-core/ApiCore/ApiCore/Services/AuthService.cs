@@ -53,7 +53,7 @@ public class AuthService
     {
         // Ищем пользователя в БД по имени
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Username.ToLower() == request.Username.ToLower());
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == request.Email.ToLower());
 
         if (user == null) return null;
 

@@ -17,7 +17,7 @@ public class User
 
     [Required]
     [Column("email")]
-    public string Email { get; set; }
+    public string Email { get; set; } = string.Empty;
 
     [Required]
     [Column("password_hash")]
