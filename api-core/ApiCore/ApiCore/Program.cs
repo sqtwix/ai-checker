@@ -108,4 +108,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseAuthorization();
 app.MapControllers();
+
+// Автоматически применяем авторизацию ко всем контроллерам, чтобы обеспечить безопасность API
+app.MapControllers().RequireAuthorization();
 app.Run();
