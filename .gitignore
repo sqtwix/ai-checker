@@ -1,10 +1,12 @@
-# env
-*.env
+# Системные папки компиляции .NET
+bin/
+obj/
 
-# building .net files
-/bin
-*.bin
-/obj
-*.obj
-*.vs
+# Кэш и настройки сред разработки
+.vs/
+*.user
+*.suo
+*.userosscache
 
+# Локальные переменные среды
+.env
