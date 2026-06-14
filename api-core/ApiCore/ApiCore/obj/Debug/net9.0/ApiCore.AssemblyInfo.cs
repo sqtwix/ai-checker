@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ApiCore")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2c9d29302e50b2bc6dadf5636cfce95a444b0244")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7ab36e6ea1e3156e0ef0e3d67f8db877f745478c")]
 [assembly: System.Reflection.AssemblyProductAttribute("ApiCore")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ApiCore")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
