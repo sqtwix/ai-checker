@@ -45,6 +45,7 @@ services:
       - "8000:8000"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - SBERGPT_API_KEY=${SBERGPT_API_KEY}
     networks:
       - saas-network
 
