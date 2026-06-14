@@ -85,7 +85,14 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddSingleton<ValidationService>();
 builder.Services.AddScoped<FileParser>();
 builder.Services.AddScoped<AuthService>();
-builder.Services.AddHttpClient<AnalysisService>();
+builder.Services.AddHttpClient<AnalysisService>(client =>
+{
+    // Чтение URL для ai-driver из конфигурации, с дефолтом на localhost для удобства разработки
+    var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
+
+    // Важно: для BaseAddress в .NET адрес должен обязательно заканчиваться на слэш '/'
+    client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
+});
 
 var app = builder.Build();
 

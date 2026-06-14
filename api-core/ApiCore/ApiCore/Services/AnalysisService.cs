@@ -53,7 +53,7 @@ public class AnalysisService
             var httpContent = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
             // Отправляем POST запрос в сервис ai-driver (url берется из конфига docker-compose)
-            var response = await _httpClient.PostAsync("http://ai-driver:8000/api/v1/analyze", httpContent);
+            var response = await _httpClient.PostAsync("api/v1/analyze", httpContent);
 
             if (response.IsSuccessStatusCode)
             {
