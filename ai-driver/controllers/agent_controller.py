@@ -2,6 +2,7 @@ from backend.agent_manager import AgentManager
 from schemas.analysis_response import AnalysisResponse
 from schemas.analysis_request import AnalysisRequest
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 class AgentController:
     def __init__(self, agent_manager : AgentManager):
@@ -9,8 +10,12 @@ class AgentController:
 
     def get_deepseek_data_analysis(self, input_data : AnalysisRequest) -> AnalysisResponse:
         try:
-            ai_responses = self.agent_manager.start_deepseek_processing(input_data=input_data.model_dump_json())
-            return AnalysisResponse.model_validate_json(ai_responses)
+            #ai_responses = self.agent_manager.start_deepseek_processing(input_data=input_data.model_dump_json())
+            #return AnalysisResponse.model_validate_json(ai_responses)
+            return JSONResponse(
+                status_code=202,
+                content={"message": "Принято на обработку"}
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Get data from DeepSeek Error: {e.__str__()}") 
         

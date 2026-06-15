@@ -1,37 +1,65 @@
+using System.Text;
 using ApiCore.Data;
 using ApiCore.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer; // Добавить этот using
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Any;
-using Microsoft.OpenApi.Models; // Добавить этот using
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. Подключение PostgreSQL
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddControllers();
 
-// Настраиваем генератор OpenAPI .NET 9 через OperationTransformer
+// 2. НАСТРОЙКА JWT ВАЛИДАЦИИ (Этого блока не хватало)
+var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+var secretKey = jwtSettings["Secret"] ?? throw new InvalidOperationException("JWT Secret is missing.");
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+        ClockSkew = TimeSpan.Zero
+    };
+});
+
+builder.Services.AddAuthorization();
+
+// 3. НАСТРОЙКА OPENAPI / SWAGGER
 builder.Services.AddOpenApi(options =>
 {
+    // ТРАНСФОРМЕР ОПЕРАЦИЙ: Логика для конкретных ручек (файлы + вешаем замочки)
     options.AddOperationTransformer((operation, context, cancellationToken) =>
     {
-        // Находим нашу ручку загрузки файлов по её относительному пути
+        // Кастомная схема для multipart/form-data (ручка загрузки файлов)
         if (context.Description.RelativePath != null &&
             context.Description.RelativePath.Contains("api/v1/analysis/upload", StringComparison.OrdinalIgnoreCase))
         {
-            // Инициализируем RequestBody и полностью очищаем дефолтно сгенерированный мусор
             operation.RequestBody ??= new OpenApiRequestBody();
             operation.RequestBody.Content.Clear();
 
-            // Создаем чистую, правильную схему для формы multipart/form-data
             var formSchema = new OpenApiSchema
             {
                 Type = "object",
                 Required = new HashSet<string> { "benchmarkFile", "userResponseFiles" }
             };
 
-            // 1. Поле для одиночного эталонного файла (мапим в тип string с форматом binary)
             formSchema.Properties.Add("benchmarkFile", new OpenApiSchema
             {
                 Type = "string",
@@ -39,19 +67,13 @@ builder.Services.AddOpenApi(options =>
                 Description = "Эталонный файл с ответами курса (.csv / .json)"
             });
 
-            // 2. Поле для массива файлов с ответами студентов (массив строк с форматом binary)
             formSchema.Properties.Add("userResponseFiles", new OpenApiSchema
             {
                 Type = "array",
-                Items = new OpenApiSchema
-                {
-                    Type = "string",
-                    Format = "binary"
-                },
+                Items = new OpenApiSchema { Type = "string", Format = "binary" },
                 Description = "Массив файлов с реальными ответами студентов"
             });
 
-            // 3. Поле для выбора модели нейросети с дефолтным значением
             formSchema.Properties.Add("modelType", new OpenApiSchema
             {
                 Type = "string",
@@ -59,38 +81,61 @@ builder.Services.AddOpenApi(options =>
                 Description = "Модель ИИ (deepseek или gigachat)"
             });
 
-            // Записываем собранный multipart/form-data в контракт операции
             operation.RequestBody.Content.Add("multipart/form-data", new OpenApiMediaType
             {
                 Schema = formSchema
             });
         }
 
-        options.AddDocumentTransformer((document, context, cancellationToken) =>
+        // АВТО-ПРИВЯЗКА ЗАМОЧКА: Если ручка закрыта авторизацией, добавляем требование JWT
+        var isAuthAction = context.Description.RelativePath?.Contains("api/v1/auth", StringComparison.OrdinalIgnoreCase) ?? false;
+        if (!isAuthAction)
         {
-            document.Servers.Clear();
-            document.Servers.Add(new OpenApiServer
+            operation.Security ??= new List<OpenApiSecurityRequirement>();
+            var securityScheme = new OpenApiSecurityScheme
             {
-                Url = "http://localhost:5000",
-                Description = "Локальный Docker контейнер"
-            });
-            return Task.CompletedTask;
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            };
+            operation.Security.Add(new OpenApiSecurityRequirement { [securityScheme] = Array.Empty<string>() });
+        }
+
+        return Task.CompletedTask;
+    });
+
+    // ТРАНСФОРМЕР ДОКУМЕНТА: Глобальные настройки (Сервер + Кнопка Authorize)
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        // Фикс адреса сервера для Docker
+        document.Servers.Clear();
+        document.Servers.Add(new OpenApiServer
+        {
+            Url = "http://localhost:5000",
+            Description = "Локальный Docker контейнер"
+        });
+
+        // Регистрируем саму схему авторизации "Bearer" в компонентах OpenAPI
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes.Add("Bearer", new OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Введите ваш JWT токен. Слово 'Bearer' подставится автоматически."
         });
 
         return Task.CompletedTask;
     });
 });
 
-// Регистрация сервисов в DI
+// 4. Регистрация сервисов в DI
 builder.Services.AddSingleton<ValidationService>();
 builder.Services.AddScoped<FileParser>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddHttpClient<AnalysisService>(client =>
 {
-    // Чтение URL для ai-driver из конфигурации, с дефолтом на localhost для удобства разработки
     var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
-
-    // Важно: для BaseAddress в .NET адрес должен обязательно заканчиваться на слэш '/'
     client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
 });
 
@@ -99,7 +144,6 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/openapi/v1.json", "OpenAPI v1");
@@ -107,15 +151,32 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-using (var scope = app.Services.CreateScope())
+// 5. Инициализация СУБД с ретраями
+for (int retry = 0; retry < 5; retry++)
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    dbContext.Database.EnsureCreated();
+    try
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            dbContext.Database.EnsureCreated();
+        }
+        Console.WriteLine(">>>> [УСПЕХ] Успешное подключение к PostgreSQL.");
+        break;
+    }
+    catch
+    {
+        if (retry == 4) throw;
+        Console.WriteLine($">>>> [ОЖИДАНИЕ] База данных еще создается (Попытка {retry + 1}/5)...");
+        Thread.Sleep(2000);
+    }
 }
 
-app.UseAuthorization();
-app.MapControllers();
+// 6. MIDDLEWARE (Порядок строго критичен!)
+app.UseAuthentication(); // СНАЧАЛА: Расшифровываем токен и узнаем кто это
+app.UseAuthorization();  // ЗАТЕМ: Проверяем права доступа к методам
 
-// Автоматически применяем авторизацию ко всем контроллерам, чтобы обеспечить безопасность API
+// Глобальная защита эндпоинтов
 app.MapControllers().RequireAuthorization();
+
 app.Run();

@@ -53,7 +53,15 @@ public class AnalysisService
             var httpContent = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
             // Отправляем POST запрос в сервис ai-driver (url берется из конфига docker-compose)
-            var response = await _httpClient.PostAsync("api/v1/analyze", httpContent);
+            // Определяем эндпоинт в зависимости от выбранной модели ИИ
+            string endpoint = modelType?.ToLower() switch
+            {
+                "gigachat" or "sbergpt" => "agents/get_sbergpt_data_analysis",
+                _ => "agents/get_deepseek_data_analysis"
+            };
+
+            // Отправляем POST запрос в сервис ai-driver
+            var response = await _httpClient.PostAsync(endpoint, httpContent);
 
             if (response.IsSuccessStatusCode)
             {

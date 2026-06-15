@@ -1,7 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 class AnalysisRequest(BaseModel):
-    question_text: str
-    correct_answer: str
-    user_answer: str
-    time_spent_seconds: int
+    model_config = ConfigDict(extra='allow')
