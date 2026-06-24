@@ -534,6 +534,18 @@ p {
   background: var(--mint);
 }
 
+.error-box {
+  margin: 16px 0;
+  padding: 14px;
+  background: #f7e6df;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .progress-track {
   height: 12px;
   margin: 20px 0 28px;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { login, register } from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -58,17 +59,55 @@ function App() {
   const [analysisTaskId, setAnalysisTaskId] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  // Authentication states
+  const [token, setToken] = useState(() => localStorage.getItem("token") || "");
+  const [user, setUser] = useState(() => localStorage.getItem("username") || "");
+  const [authError, setAuthError] = useState("");
+
+  // Login form states
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+
+  // Register form states
+  const [registerUsername, setRegisterUsername] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+
   const benchInputRef = useRef(null);
   const responsesInputRef = useRef(null);
   const intervalRef = useRef(null);
 
-  // Sync route with window hash
+  // Sync route with window hash and enforce route protection
   useEffect(() => {
     const handleHashChange = () => {
       const newRoute = window.location.hash.replace("#", "") || "upload";
-      setRoute(newRoute);
+      
+      const isAuthRoute = newRoute === "login" || newRoute === "register";
+      const hasToken = !!localStorage.getItem("token");
+
+      if (!hasToken && !isAuthRoute) {
+        window.location.hash = "login";
+      } else if (hasToken && isAuthRoute) {
+        window.location.hash = "upload";
+      } else {
+        setRoute(newRoute);
+      }
       setIsMenuOpen(false); // Close mobile drawer on route change
     };
+
+    const initialRoute = window.location.hash.replace("#", "") || "upload";
+    const isAuthRoute = initialRoute === "login" || initialRoute === "register";
+    const hasToken = !!localStorage.getItem("token");
+
+    if (!hasToken && !isAuthRoute) {
+      window.location.hash = "login";
+      setRoute("login");
+    } else if (hasToken && isAuthRoute) {
+      window.location.hash = "upload";
+      setRoute("upload");
+    } else {
+      setRoute(initialRoute);
+    }
 
     window.addEventListener("hashchange", handleHashChange);
     return () => {
@@ -81,6 +120,67 @@ function App() {
   useEffect(() => {
     document.title = "EduCheck AI — личный кабинет";
   }, []);
+
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    try {
+      if (!loginEmail || !loginPassword) {
+        throw new Error("Заполните все поля.");
+      }
+      const data = await login(loginEmail, loginPassword);
+      if (data && data.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("username", data.username);
+        setToken(data.token);
+        setUser(data.username);
+        setLoginEmail("");
+        setLoginPassword("");
+        window.location.hash = "upload";
+      } else {
+        throw new Error("Неверный формат ответа сервера.");
+      }
+    } catch (err) {
+      setAuthError(err.message || "Ошибка авторизации.");
+    }
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    try {
+      if (!registerUsername || !registerEmail || !registerPassword) {
+        throw new Error("Заполните все поля.");
+      }
+      if (registerPassword.length < 6) {
+        throw new Error("Пароль должен быть не менее 6 символов.");
+      }
+      const data = await register(registerUsername, registerEmail, registerPassword);
+      if (data && data.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("username", data.username);
+        setToken(data.token);
+        setUser(data.username);
+        setRegisterUsername("");
+        setRegisterEmail("");
+        setRegisterPassword("");
+        window.location.hash = "upload";
+      } else {
+        throw new Error("Неверный формат ответа сервера.");
+      }
+    } catch (err) {
+      setAuthError(err.message || "Ошибка регистрации.");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("username");
+    setToken("");
+    setUser("");
+    setRoute("login");
+    window.location.hash = "login";
+  };
 
   // Handle responsive mobile drawer class toggles on body
   useEffect(() => {
@@ -419,21 +519,38 @@ function App() {
     if (route === "login") {
       return (
         <section className="page auth-page active" id="login" data-title="Авторизация">
-          <form className="auth-card" onSubmit={(e) => e.preventDefault()}>
+          <form className="auth-card" onSubmit={handleLoginSubmit}>
             <p className="eyebrow">Вход</p>
             <h2>Добро пожаловать обратно</h2>
-            <label>Email<input type="email" placeholder="name@university.ru" required /></label>
-            <label>Пароль<input type="password" placeholder="••••••••" required /></label>
+            {authError && <div className="error-box">{authError}</div>}
+            <label>
+              Email
+              <input
+                type="email"
+                placeholder="name@university.ru"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Пароль
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                required
+              />
+            </label>
             <button
-              type="button"
+              type="submit"
               className="primary-button wide"
-              onClick={() => {
-                window.location.hash = "upload";
-              }}
+              style={{ border: 0 }}
             >
               Войти
             </button>
-            <a href="#register">Создать аккаунт</a>
+            <a href="#register" onClick={() => setAuthError("")}>Создать аккаунт</a>
           </form>
         </section>
       );
@@ -442,22 +559,48 @@ function App() {
     if (route === "register") {
       return (
         <section className="page auth-page active" id="register" data-title="Регистрация">
-          <form className="auth-card" onSubmit={(e) => e.preventDefault()}>
+          <form className="auth-card" onSubmit={handleRegisterSubmit}>
             <p className="eyebrow">Регистрация</p>
             <h2>Создайте рабочее пространство</h2>
-            <label>Имя<input type="text" placeholder="Ирина" required /></label>
-            <label>Email<input type="email" placeholder="name@university.ru" required /></label>
-            <label>Пароль<input type="password" placeholder="Минимум 8 символов" required /></label>
+            {authError && <div className="error-box">{authError}</div>}
+            <label>
+              Имя пользователя
+              <input
+                type="text"
+                placeholder="Ирина"
+                value={registerUsername}
+                onChange={(e) => setRegisterUsername(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                placeholder="name@university.ru"
+                value={registerEmail}
+                onChange={(e) => setRegisterEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Пароль
+              <input
+                type="password"
+                placeholder="Минимум 6 символов"
+                value={registerPassword}
+                onChange={(e) => setRegisterPassword(e.target.value)}
+                required
+              />
+            </label>
             <button
-              type="button"
+              type="submit"
               className="primary-button wide"
-              onClick={() => {
-                window.location.hash = "upload";
-              }}
+              style={{ border: 0 }}
             >
               Зарегистрироваться
             </button>
-            <a href="#login">Уже есть аккаунт</a>
+            <a href="#login" onClick={() => setAuthError("")}>Уже есть аккаунт</a>
           </form>
         </section>
       );
@@ -570,8 +713,26 @@ function App() {
             <h1 id="page-title">{getPageTitle(route)}</h1>
           </div>
           <div className="top-actions">
-            <a className="ghost-button" href="#login">Войти</a>
-            <a className="primary-button" href="#register">Регистрация</a>
+            {token ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                <span style={{ fontSize: "14px", fontWeight: "600", color: "var(--text)" }}>
+                  👤 {user}
+                </span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={handleLogout}
+                  style={{ minHeight: "36px", padding: "6px 12px" }}
+                >
+                  Выйти
+                </button>
+              </div>
+            ) : (
+              <>
+                <a className="ghost-button" href="#login" onClick={() => setAuthError("")}>Войти</a>
+                <a className="primary-button" href="#register" onClick={() => setAuthError("")}>Регистрация</a>
+              </>
+            )}
           </div>
         </header>
 
