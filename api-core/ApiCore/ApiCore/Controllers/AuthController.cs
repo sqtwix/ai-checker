@@ -1,4 +1,4 @@
-﻿using ApiCore.Models;
+using ApiCore.Models;
 using ApiCore.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,7 +23,7 @@ public class AuthController : ControllerBase
         var result = await _authService.RegisterAsync(request);
         if (result == null)
         {
-            return BadRequest(new { error = "Пользователь с таким именем уже существует." });
+            return BadRequest(new { error = "Пользователь с такой почтой уже зарегистрирован." });
         }
 
         return Ok(result);

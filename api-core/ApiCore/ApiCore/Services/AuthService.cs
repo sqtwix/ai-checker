@@ -1,4 +1,4 @@
-﻿using ApiCore.Data;
+using ApiCore.Data;
 using ApiCore.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -26,8 +26,7 @@ public class AuthService
     {
         // Проверяем асинхронно, занято ли имя пользователя ИЛИ почта
         var userExists = await _context.Users
-            .AnyAsync(u => u.Username.ToLower() == request.Username.ToLower()
-                        || u.Email.ToLower() == request.Email.ToLower());
+            .AnyAsync(u => u.Email.ToLower() == request.Email.ToLower());
 
         if (userExists)
         {

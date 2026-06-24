@@ -19,6 +19,16 @@ services:
     networks:
       - saas-network
 
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api-core
+    networks:
+      - saas-network
+
   postgres:
     image: postgres:15-alpine
     container_name: aichecker-postgres

@@ -616,6 +616,16 @@ function App() {
     );
   };
 
+  const isAuthRoute = route === "login" || route === "register";
+
+  if (isAuthRoute) {
+    return (
+      <div className="auth-shell">
+        {renderActivePage()}
+      </div>
+    );
+  }
+
   return (
     <div className={`app-shell`}>
       <aside className="sidebar" aria-label="Основная навигация">

@@ -15,6 +15,16 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddControllers();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 // 2. НАСТРОЙКА JWT ВАЛИДАЦИИ (Этого блока не хватало)
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSettings["Secret"] ?? throw new InvalidOperationException("JWT Secret is missing.");
@@ -173,6 +183,7 @@ for (int retry = 0; retry < 5; retry++)
 }
 
 // 6. MIDDLEWARE (Порядок строго критичен!)
+app.UseCors("AllowFrontend");
 app.UseAuthentication(); // СНАЧАЛА: Расшифровываем токен и узнаем кто это
 app.UseAuthorization();  // ЗАТЕМ: Проверяем права доступа к методам
 
