@@ -1,0 +1,583 @@
+import { useState, useEffect, useRef } from "react";
+
+// Initial Mock Reports Data representing ChatGPT-like dialog history
+const initialMockReports = [
+  {
+    id: "1",
+    course: "Электронный курс Python",
+    title: "Выявлены аномалии в промежуточных тестах и синтаксисе",
+    errors: [
+      { priority: "high", val: "65%", question: "Вопрос q_1_1", text: "Студенты массово выбирают неверный вариант с приставкой. Вероятная причина: путаница между звонкими и глухими согласными." },
+      { priority: "medium", val: "42%", question: "Вопрос q_1_6", text: "Часть ответов совпадает с эталоном символ в символ, включая редкие опечатки." }
+    ],
+    recommendations: [
+      "Добавить короткую справку по правописанию приставок.",
+      "Перемешать варианты ответов в промежуточном тесте.",
+      "Проверить студентов с аномально коротким временем прохождения."
+    ]
+  },
+  {
+    id: "2",
+    course: "Базы данных & SQL",
+    title: "Провалы в теме сложных многотабличных запросов",
+    errors: [
+      { priority: "high", val: "50%", question: "Вопрос q_3_2", text: "Студенты путают LEFT JOIN и INNER JOIN, выбирая неверные условия фильтрации." },
+      { priority: "medium", val: "30%", question: "Вопрос q_3_5", text: "Забывают использовать WHERE при операциях DELETE, что приводит к полной очистке таблиц в симуляторе." }
+    ],
+    recommendations: [
+      "Добавить интерактивный тренажер по типам соединений таблиц JOIN.",
+      "Включить предупреждающие подсказки в редактор запросов перед выполнением DELETE/UPDATE."
+    ]
+  },
+  {
+    id: "3",
+    course: "Веб-дизайн UX/UI",
+    title: "Массовое несоблюдение стандартов доступности интерфейсов",
+    errors: [
+      { priority: "high", val: "75%", question: "Вопрос q_UX_4", text: "Студенты не смогли верно рассчитать коэффициент контрастности для текста на цветном фоне." },
+      { priority: "low", val: "25%", question: "Вопрос q_UX_7", text: "Аномальное совпадение цветовых палитр, вероятные признаки списывания дизайна." }
+    ],
+    recommendations: [
+      "Провести вебинар или добавить практикум по стандартам веб-доступности WCAG.",
+      "Разнообразить индивидуальные задания на проектирование цветовых схем."
+    ]
+  }
+];
+
+function App() {
+  const [route, setRoute] = useState(() => {
+    return window.location.hash.replace("#", "") || "upload";
+  });
+  const [mockReports, setMockReports] = useState(initialMockReports);
+  const [selectedModel, setSelectedModel] = useState("DeepSeek");
+  const [selectedBenchFile, setSelectedBenchFile] = useState(null);
+  const [selectedResponseFiles, setSelectedResponseFiles] = useState([]);
+  const [showValidation, setShowValidation] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisTaskId, setAnalysisTaskId] = useState("");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const benchInputRef = useRef(null);
+  const responsesInputRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  // Sync route with window hash
+  useEffect(() => {
+    const handleHashChange = () => {
+      const newRoute = window.location.hash.replace("#", "") || "upload";
+      setRoute(newRoute);
+      setIsMenuOpen(false); // Close mobile drawer on route change
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  // Update document title dynamically
+  useEffect(() => {
+    document.title = "EduCheck AI — личный кабинет";
+  }, []);
+
+  // Handle responsive mobile drawer class toggles on body
+  useEffect(() => {
+    document.body.classList.toggle("menu-open", isMenuOpen);
+  }, [isMenuOpen]);
+
+  const getPageTitle = (currentRoute) => {
+    if (currentRoute === "upload") return "Загрузка данных";
+    if (currentRoute.startsWith("report-detail-")) return "Детали отчёта";
+    if (currentRoute === "students") return "Студенты";
+    if (currentRoute === "settings") return "Настройки";
+    if (currentRoute === "login") return "Авторизация";
+    if (currentRoute === "register") return "Регистрация";
+    return "EduCheck AI";
+  };
+
+  const handleFileChange = (e, type) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (type === "bench") {
+      setSelectedBenchFile(files[0]);
+    } else if (type === "responses") {
+      setSelectedResponseFiles(Array.from(files));
+    }
+  };
+
+  // Trigger validation banner visibility
+  useEffect(() => {
+    if (selectedBenchFile && selectedResponseFiles.length > 0) {
+      setShowValidation(true);
+    } else {
+      setShowValidation(false);
+    }
+  }, [selectedBenchFile, selectedResponseFiles]);
+
+  const resetUploadForm = () => {
+    setSelectedBenchFile(null);
+    setSelectedResponseFiles([]);
+    setShowValidation(false);
+    setIsAnalyzing(false);
+    setAnalysisProgress(0);
+    if (benchInputRef.current) benchInputRef.current.value = "";
+    if (responsesInputRef.current) responsesInputRef.current.value = "";
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+
+  const startAnalysis = () => {
+    if (!selectedBenchFile || selectedResponseFiles.length === 0) {
+      alert("Пожалуйста, выберите эталонный файл и файлы ответов перед запуском анализа.");
+      return;
+    }
+
+    const taskId = "task_" + Math.random().toString(36).substring(2, 8).toUpperCase();
+    setAnalysisTaskId(taskId);
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+
+    let progress = 0;
+    intervalRef.current = setInterval(() => {
+      progress += Math.floor(Math.random() * 12) + 6;
+      if (progress >= 100) {
+        progress = 100;
+        setAnalysisProgress(100);
+        clearInterval(intervalRef.current);
+
+        // Transition to newly created report detail screen after brief delay
+        setTimeout(() => {
+          const newReportId = (mockReports.length + 1).toString();
+          const cleanBenchName = selectedBenchFile.name.replace(/\.[^/.]+$/, "");
+          const cleanResponseName = selectedResponseFiles[0].name.replace(/\.[^/.]+$/, "");
+          const courseName = `${cleanBenchName} & ${cleanResponseName}${
+            selectedResponseFiles.length > 1 ? ` +${selectedResponseFiles.length - 1}` : ""
+          }`;
+
+          const newReport = {
+            id: newReportId,
+            course: courseName,
+            title: "Индивидуальный анализ: " + selectedBenchFile.name,
+            errors: [
+              { priority: "high", val: "60%", question: "Вопрос q_uploaded_1", text: "Выявлены регулярные ошибки при выходе из циклов и работе со строками. Студенты склонны путать индексацию с 0 и 1." },
+              { priority: "medium", val: "35%", question: "Вопрос q_uploaded_2", text: "Обнаружено совпадение структуры решений с эталоном до мелких деталей, возможен плагиат." }
+            ],
+            recommendations: [
+              "Рекомендуется обновить тестовые задачи для снижения риска заучивания.",
+              "Провести лекционный разбор темы индексации коллекций."
+            ]
+          };
+
+          setMockReports((prev) => [...prev, newReport]);
+          resetUploadForm();
+          window.location.hash = `report-detail-${newReportId}`;
+        }, 1000);
+      } else {
+        setAnalysisProgress(progress);
+      }
+    }, 250);
+  };
+
+  const getTimelineStepClass = (stepIndex, currentProgress) => {
+    const thresholds = [0, 25, 50, 75];
+    if (currentProgress >= thresholds[stepIndex]) {
+      if (currentProgress > thresholds[stepIndex] + 20 || currentProgress === 100) {
+        return "done";
+      }
+      return "active-step";
+    }
+    return "";
+  };
+
+  const renderActivePage = () => {
+    if (route === "upload") {
+      return (
+        <section className="page active" id="upload" data-title="Загрузка данных">
+          {!isAnalyzing ? (
+            <div className="split upload-layout" id="upload-form-panel">
+              <section className="panel">
+                <p className="eyebrow">Новый анализ</p>
+                <h2>Загрузите эталон и ответы студентов</h2>
+                <p className="muted">Поддерживаются CSV и JSON. Если файл пустой или в нём не хватает колонок, система покажет понятную ошибку до запуска ИИ.</p>
+
+                <div
+                  className="dropzone"
+                  id="bench-dropzone"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => benchInputRef.current.click()}
+                >
+                  <span>⇧</span>
+                  <strong id="bench-file-name">{selectedBenchFile ? selectedBenchFile.name : "Эталонный файл"}</strong>
+                  <p>Кликните для выбора benchmark.csv или benchmark.json</p>
+                  <input
+                    type="file"
+                    id="bench-input"
+                    ref={benchInputRef}
+                    style={{ display: "none" }}
+                    accept=".csv,.json"
+                    onChange={(e) => handleFileChange(e, "bench")}
+                  />
+                </div>
+
+                <div
+                  className="dropzone compact"
+                  id="responses-dropzone"
+                  style={{ cursor: "pointer", marginTop: "14px" }}
+                  onClick={() => responsesInputRef.current.click()}
+                >
+                  <span>＋</span>
+                  <strong id="responses-file-name">
+                    {selectedResponseFiles.length === 0
+                      ? "Файлы с ответами"
+                      : selectedResponseFiles.length === 1
+                      ? selectedResponseFiles[0].name
+                      : `Выбрано файлов: ${selectedResponseFiles.length}`}
+                  </strong>
+                  <p>Кликните для добавления нескольких файлов ответов</p>
+                  <input
+                    type="file"
+                    id="responses-input"
+                    ref={responsesInputRef}
+                    style={{ display: "none" }}
+                    multiple
+                    accept=".csv,.json"
+                    onChange={(e) => handleFileChange(e, "responses")}
+                  />
+                </div>
+              </section>
+
+              <section className="panel">
+                <p className="eyebrow">Параметры</p>
+                <h3>Модель и формат отчёта</h3>
+                <label className="field-label">ИИ-модель</label>
+                <div className="segmented" id="model-selector-container">
+                  <button
+                    type="button"
+                    className={selectedModel === "DeepSeek" ? "selected" : ""}
+                    onClick={() => setSelectedModel("DeepSeek")}
+                  >
+                    DeepSeek
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedModel === "GigaChat" ? "selected" : ""}
+                    onClick={() => setSelectedModel("GigaChat")}
+                  >
+                    GigaChat
+                  </button>
+                </div>
+
+                <label className="field-label">Экспорт</label>
+                <div className="checks">
+                  <label><input type="checkbox" defaultChecked /> Excel с подсветкой</label>
+                  <label><input type="checkbox" defaultChecked /> JSON</label>
+                  <label><input type="checkbox" /> PDF для защиты</label>
+                </div>
+
+                {showValidation && (
+                  <div className="validation-box" id="upload-validation-box" style={{ marginTop: "20px" }}>
+                    <b>Проверка пройдена</b>
+                    <p>Колонки распознаны успешно. Формат корректен.</p>
+                  </div>
+                )}
+
+                <button
+                  className="primary-button wide"
+                  id="start-analysis-btn"
+                  style={{ marginTop: "20px", border: 0, width: "100%" }}
+                  onClick={startAnalysis}
+                >
+                  Запустить анализ
+                </button>
+              </section>
+            </div>
+          ) : (
+            <div className="panel" id="upload-progress-panel" style={{ marginTop: "0" }}>
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow" id="progress-task-id">Задача {analysisTaskId}</p>
+                  <h2>Выполнение анализа</h2>
+                </div>
+                <span className="badge" id="progress-percentage-badge">{analysisProgress}%</span>
+              </div>
+              <div className="progress-track">
+                <span id="progress-fill-bar" style={{ width: `${analysisProgress}%`, transition: "width 0.4s ease" }}></span>
+              </div>
+              <div className="timeline" id="progress-timeline-steps">
+                <div id="step-1" className={getTimelineStepClass(0, analysisProgress)}>
+                  <b>Файлы приняты</b>
+                  <p>Эталон и файлы ответов прошли базовую проверку.</p>
+                </div>
+                <div id="step-2" className={getTimelineStepClass(1, analysisProgress)}>
+                  <b>Данные приведены к JSON</b>
+                  <p>api-core подготовил структуру для ai-driver.</p>
+                </div>
+                <div id="step-3" className={getTimelineStepClass(2, analysisProgress)}>
+                  <b>ИИ-агенты анализируют паттерны</b>
+                  <p>Статистик проверяет время, методист ищет типовые ошибки.</p>
+                </div>
+                <div id="step-4" className={getTimelineStepClass(3, analysisProgress)}>
+                  <b>Формируется отчёт</b>
+                  <p>Excel, JSON и PDF будут готовы после завершения.</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      );
+    }
+
+    if (route.startsWith("report-detail-")) {
+      const reportId = route.replace("report-detail-", "");
+      const report = mockReports.find((r) => r.id === reportId);
+
+      if (!report) {
+        return (
+          <section className="page active">
+            <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+              <h2>Отчёт не найден</h2>
+              <p className="muted">Пожалуйста, выберите существующий отчёт из истории в левой панели.</p>
+            </div>
+          </section>
+        );
+      }
+
+      return (
+        <section className="page active" id="report-detail" data-title="Детали отчёта">
+          <div className="report-header">
+            <div>
+              <p className="eyebrow" id="report-course-eyebrow">{report.course}</p>
+              <h2 id="report-title-heading">{report.title}</h2>
+            </div>
+            <div className="export-actions">
+              <button type="button" className="secondary-button">Excel</button>
+              <button type="button" className="secondary-button">JSON</button>
+              <button type="button" className="primary-button">PDF</button>
+            </div>
+          </div>
+
+          <div className="grid two">
+            <section className="panel">
+              <h3>Критичные массовые ошибки</h3>
+              <div id="report-errors-container">
+                {report.errors.map((err, i) => (
+                  <article key={i} className="finding">
+                    <span className={`priority ${err.priority}`}>{err.val}</span>
+                    <div>
+                      <b>{err.question}</b>
+                      <p>{err.text}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel">
+              <h3>Рекомендации</h3>
+              <ul className="recommendations" id="report-recommendations-list">
+                {report.recommendations.map((rec, i) => (
+                  <li key={i}>{rec}</li>
+                ))}
+              </ul>
+            </section>
+          </div>
+        </section>
+      );
+    }
+
+    if (route === "students") {
+      return (
+        <section className="page active" id="students" data-title="Студенты">
+          <section className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+            <span style={{ fontSize: "48px", display: "block", marginBottom: "20px" }}>🚧</span>
+            <h2>Раздел «Студенты» в разработке</h2>
+            <p className="muted" style={{ maxWidth: "480px", margin: "0 auto", lineHeight: "1.6" }}>
+              Детальная аналитика по каждому студенту, включая выявление аномального времени прохождения и совпадения текстовых ответов, будет доступна в следующей версии.
+            </p>
+          </section>
+        </section>
+      );
+    }
+
+    if (route === "settings") {
+      return (
+        <section className="page active" id="settings" data-title="Настройки">
+          <section className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+            <span style={{ fontSize: "48px", display: "block", marginBottom: "20px" }}>⚙️</span>
+            <h2>Раздел «Настройки» в разработке</h2>
+            <p className="muted" style={{ maxWidth: "480px", margin: "0 auto", lineHeight: "1.6" }}>
+              Настройка параметров интеграции с ИИ-моделями (DeepSeek, GigaChat) и лимитов бюджета на запросы будет доступна в следующей версии.
+            </p>
+          </section>
+        </section>
+      );
+    }
+
+    if (route === "login") {
+      return (
+        <section className="page auth-page active" id="login" data-title="Авторизация">
+          <form className="auth-card" onSubmit={(e) => e.preventDefault()}>
+            <p className="eyebrow">Вход</p>
+            <h2>Добро пожаловать обратно</h2>
+            <label>Email<input type="email" placeholder="name@university.ru" required /></label>
+            <label>Пароль<input type="password" placeholder="••••••••" required /></label>
+            <button
+              type="button"
+              className="primary-button wide"
+              onClick={() => {
+                window.location.hash = "upload";
+              }}
+            >
+              Войти
+            </button>
+            <a href="#register">Создать аккаунт</a>
+          </form>
+        </section>
+      );
+    }
+
+    if (route === "register") {
+      return (
+        <section className="page auth-page active" id="register" data-title="Регистрация">
+          <form className="auth-card" onSubmit={(e) => e.preventDefault()}>
+            <p className="eyebrow">Регистрация</p>
+            <h2>Создайте рабочее пространство</h2>
+            <label>Имя<input type="text" placeholder="Ирина" required /></label>
+            <label>Email<input type="email" placeholder="name@university.ru" required /></label>
+            <label>Пароль<input type="password" placeholder="Минимум 8 символов" required /></label>
+            <button
+              type="button"
+              className="primary-button wide"
+              onClick={() => {
+                window.location.hash = "upload";
+              }}
+            >
+              Зарегистрироваться
+            </button>
+            <a href="#login">Уже есть аккаунт</a>
+          </form>
+        </section>
+      );
+    }
+
+    return (
+      <section className="page active">
+        <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+          <h2>Страница не найдена</h2>
+          <a href="#upload" className="primary-button" style={{ marginTop: "20px" }}>Назад на главную</a>
+        </div>
+      </section>
+    );
+  };
+
+  return (
+    <div className={`app-shell`}>
+      <aside className="sidebar" aria-label="Основная навигация">
+        <a className="brand" href="#upload" aria-label="EduCheck AI">
+          <span className="brand-mark">E</span>
+          <span>
+            <strong>EduCheck AI</strong>
+            <small>анализ ответов</small>
+          </span>
+        </a>
+
+        {/* Новый анализ (аналог "Новый чат") */}
+        <a
+          href="#upload"
+          className={`new-chat-btn ${route === "upload" ? "active" : ""}`}
+          onClick={() => {
+            resetUploadForm();
+            window.location.hash = "upload";
+          }}
+        >
+          <span>＋</span> Новый анализ
+        </a>
+
+        <div className="sidebar-divider"></div>
+
+        <div className="eyebrow" style={{ paddingLeft: "12px", marginBottom: "8px" }}>История анализов</div>
+
+        {/* Список отчетов в боковой панели (как список диалогов в чате) */}
+        <div className="sidebar-history" id="reports-sidebar-list">
+          {mockReports.map((report) => (
+            <a
+              key={report.id}
+              href={`#report-detail-${report.id}`}
+              className={`history-item ${route === `report-detail-${report.id}` ? "active" : ""}`}
+              onClick={(e) => {
+                e.preventDefault();
+                window.location.hash = `report-detail-${report.id}`;
+              }}
+            >
+              <span>📄</span> {report.course}
+            </a>
+          ))}
+        </div>
+
+        <div className="sidebar-divider"></div>
+
+        {/* Дополнительные модули внизу */}
+        <nav className="nav" style={{ marginTop: "auto", display: "grid", gap: "6px" }}>
+          <a
+            href="#students"
+            className={route === "students" ? "active" : ""}
+            style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          >
+            <span>◫</span> Студенты <span className="in-dev-badge">В разработке</span>
+          </a>
+          <a
+            href="#settings"
+            className={route === "settings" ? "active" : ""}
+            style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          >
+            <span>⚙</span> Настройки <span className="in-dev-badge">В разработке</span>
+          </a>
+        </nav>
+
+        <div className="sidebar-note">
+          <span className="status-dot"></span>
+          <p>
+            {selectedModel === "DeepSeek" ? (
+              <>
+                DeepSeek активен<br />
+                <small>GigaChat готов как резерв</small>
+              </>
+            ) : (
+              <>
+                GigaChat активен<br />
+                <small>DeepSeek готов как резерв</small>
+              </>
+            )}
+          </p>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        <header className="topbar">
+          <button
+            className="menu-button"
+            type="button"
+            aria-label="Открыть меню"
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+          >
+            ☰
+          </button>
+          <div>
+            <p className="eyebrow">Кабинет методиста</p>
+            <h1 id="page-title">{getPageTitle(route)}</h1>
+          </div>
+          <div className="top-actions">
+            <a className="ghost-button" href="#login">Войти</a>
+            <a className="primary-button" href="#register">Регистрация</a>
+          </div>
+        </header>
+
+        {renderActivePage()}
+      </main>
+    </div>
+  );
+}
+
+export default App;
