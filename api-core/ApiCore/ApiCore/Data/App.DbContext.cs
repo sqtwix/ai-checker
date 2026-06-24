@@ -1,4 +1,4 @@
-﻿using ApiCore.Models;
+using ApiCore.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace ApiCore.Data;
@@ -22,11 +22,6 @@ public class AppDbContext : DbContext
         // Настраиваем правила для сущности User в PostgreSQL
         modelBuilder.Entity<User>(entity =>
         {
-            // Делаем колонку username уникальной на уровне СУБД
-            entity.HasIndex(u => u.Username)
-                .IsUnique()
-                .HasDatabaseName("ix_users_username");
-
             // Делаем колонку email уникальной на уровне СУБД
             entity.HasIndex(u => u.Email)
                 .IsUnique()
