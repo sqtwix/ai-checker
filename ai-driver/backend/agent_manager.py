@@ -1,94 +1,108 @@
 from backend.agent_client import AgentClient
 from backend.agent_factory import AgentFactory
 import json
-import concurrent.futures
+import logging
 from pathlib import Path
 
-# ========================= Agent Manager ========================= 
+# ========================= Agent Manager =========================
 
 # AgentManager - class, that controls Agents Queues
 # that was created by AgentFactory
-# It contains to main methods
+# It contains methods for processing with different model types
 
-# start_deepseek_processing() - that method starts process
-# with multithreads, that returns ai_responses data str in json_format
-# with deepseek agents queue
+# start_processing() - main method that starts multi-agent pipeline
+# with sequential agent execution according to role model:
+#   1. main-analyzer - analyzes answers, finds errors
+#   2. anomalies-analyzer - detects anomalies using results from step 1
+#   3. statistics-summarizer - compiles final report using results from steps 1 and 2
 
-# start_sbergpt_processing() - that method starts process
-# with multithreads, that returns ai_responses data str in json_format
-# with sbergpt agents queue
-
-# One thread contains one agent client executing task
-# that returns data from model api
-# that realization will provide more fast data transfers 
+# This sequential approach ensures that each agent builds upon
+# the context and findings of the previous one, as required by TZ.
 
 BASE_DIR = Path(__file__).resolve().parent
 PATH_TO_JSON = BASE_DIR / "system_prompts.json"
 
+# Настройка логгера
+logger = logging.getLogger(__name__)
+
 class AgentManager:
-    def __init__(self, agent_factory : AgentFactory):
+    def __init__(self, agent_factory: AgentFactory):
         try:
             self.agent_factory = agent_factory
-            self.deepseek_queue = self.agent_factory.create_queue("deepseek")
-            self.sbergpt_queue = self.agent_factory.create_queue("sbergpt")
+            # Загружаем системные промпты для всех специализаций
             with open(PATH_TO_JSON, "r") as f:
                 row_context = f.read()
                 self.system_prompts = json.loads(row_context)
         except Exception as e:
-            raise Exception("Agent Manager Initialization Error: " + e.__str__())
+            raise Exception("Agent Manager Initialization Error: " + str(e))
 
-    def start_deepseek_processing(self, input_data : str) -> str:
+    def start_deepseek_processing(self, input_data: str) -> str:
+        # Запускает конвейер агентов DeepSeek.
+        # Агенты выполняются последовательно, передавая контекст друг другу.
+        return self._run_pipeline(input_data, "deepseek")
+
+    def start_sbergpt_processing(self, input_data: str) -> str:
+        # Запускает конвейер агентов SberGPT.
+        # Агенты выполняются последовательно, передавая контекст друг другу.
+        return self._run_pipeline(input_data, "sbergpt")
+
+    def start_qwen_local_processing(self, input_data: str) -> str:
+        # Запускает конвейер агентов на локальной модели Qwen.
+        # Агенты выполняются последовательно, передавая контекст друг другу.
+        return self._run_pipeline(input_data, "qwen_local")
+
+    def _run_pipeline(self, input_data: str, model_type: str) -> str:
+        # Внутренний метод, реализующий последовательный конвейер агентов.
+        # Параметры:
+        #   input_data - JSON-строка с данными от api-core
+        #   model_type - тип модели ("deepseek", "sbergpt", "qwen_local")
+        # Возвращает:
+        #   str - JSON-строка с финальным отчетом
+
         try:
-            specializations = [
-                "main-analyzer",
-                "anomalies-analyzer",
-                "statistics-summarizer"
-            ]
+            # Получаем очередь агентов от фабрики
+            agent_queue = self.agent_factory.create_queue(model_type)
 
-            agents_count = len(self.deepseek_queue)
+            # Распаковываем агентов по ролям
+            agent_analyzer = agent_queue[0]     # main-analyzer
+            agent_anomalist = agent_queue[1]    # anomalies-analyzer
+            agent_statistician = agent_queue[2] # statistics-summarizer
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(specializations)) as executor:
-                futures = {}
-                for agent_idx, specialization in enumerate(specializations):
-                    if agent_idx < len(self.deepseek_queue):
-                        prompt = self.system_prompts[agent_idx]['prompt']
-                        future = executor.submit(self.deepseek_queue[agent_idx].execute, (prompt, input_data))
-                        futures[future] = specialization
+            # Шаг 1: Анализ ответов и сравнение с эталоном
+            logger.info("[%s] Step 1: main-analyzer starting", model_type)
+            analysis_result_str = agent_analyzer.execute(
+                self.system_prompts[0]["prompt"],
+                input_data
+            )
+            analysis_result = json.loads(analysis_result_str)
 
-                ai_responses = {}
+            # Шаг 2: Поиск аномалий (передаем исходные данные + результаты шага 1)
+            logger.info("[%s] Step 2: anomalies-analyzer starting", model_type)
+            enriched_input = json.dumps({
+                "original_data": json.loads(input_data),
+                "main_analysis": analysis_result
+            }, ensure_ascii=False)
+            anomaly_result_str = agent_anomalist.execute(
+                self.system_prompts[1]["prompt"],
+                enriched_input
+            )
+            anomaly_result = json.loads(anomaly_result_str)
 
-                for future in concurrent.futures.as_completed(futures):
-                    specialization = futures[future]
-                    ai_responses[specialization] = future.result()
+            # Шаг 3: Финальная статистика и отчет (передаем результаты шагов 1 и 2)
+            logger.info("[%s] Step 3: statistics-summarizer starting", model_type)
+            final_input = json.dumps({
+                "main_analysis": analysis_result,
+                "anomaly_analysis": anomaly_result
+            }, ensure_ascii=False)
+            final_report_str = agent_statistician.execute(
+                self.system_prompts[2]["prompt"],
+                final_input
+            )
 
-            return json.dumps(ai_responses)
+            logger.info("[%s] Pipeline completed successfully", model_type)
+            return final_report_str
+
+        except json.JSONDecodeError as e:
+            raise Exception("[%s] Pipeline JSON Error: invalid JSON from agent - %s" % (model_type, str(e)))
         except Exception as e:
-            raise Exception("DeepSeek Processing Error: " + e.__str__())
-
-    def start_sbergpt_processing(self, input_data : str):
-        try:
-            specializations = [
-                "main-analyzer",
-                "anomalies-analyzer",
-                "statistics-summarizer"
-            ]
-
-            agents_count = len(self.sbergpt_queue)
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(specializations)) as executor:
-                futures = {}
-                for agent_idx, specialization in enumerate(specializations):
-                    if agent_idx < len(self.sbergpt_queue):
-                        prompt = self.system_prompts[agent_idx]['prompt']
-                        future = executor.submit(self.sbergpt_queue[agent_idx].execute, (prompt, input_data))
-                        futures[future] = specialization
-
-                ai_responses = {}
-
-                for future in concurrent.futures.as_completed(futures):
-                    specialization = futures[future]
-                    ai_responses[specialization] = future.result()
-
-            return json.dumps(ai_responses)
-        except Exception as e:
-            raise Exception("SberGpt Processing Error: " + e.__str__())
+            raise Exception("[%s] Pipeline Processing Error: %s" % (model_type, str(e)))

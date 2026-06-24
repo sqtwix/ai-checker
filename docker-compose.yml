@@ -5,17 +5,76 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # DeepSeek конфигурация
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      # SberGPT конфигурация
       - SBERGPT_API_KEY=${SBERGPT_API_KEY}
+      - SBERGPT_BASE_URL=${SBERGPT_BASE_URL:-https://gigachat.devices.sberbank.ru/api/v1/}
+      - SBERGPT_MODEL=${SBERGPT_MODEL:-GigaChat-Pro}
+      # Локальная Qwen модель (llama.cpp)
+      - QWEN_LOCAL_URL=http://qwen-local:8080/v1
+      - QWEN_LOCAL_MODEL=${QWEN_LOCAL_MODEL:-local-model}
+    depends_on:
+      qwen-local:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - saas-network
+    restart: unless-stopped
+
+  # Сервис с локальной моделью через llama.cpp
+  qwen-local:
+    build:
+      context: ./llama-cpp
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8080"  # 8001 на хосте, 8080 в контейнере
+    volumes:
+      # Монтируем папку с моделями
+      - ./models:/models:ro  # ro - read only, безопаснее
+    environment:
+      # Путь к модели внутри контейнера
+      - MODEL_PATH=/models/qwen3-8b.Q4_K_M.gguf
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      # Параметры производительности
+      - N_CTX=8192          # Размер контекстного окна
+      - N_GPU_LAYERS=0      # 0 = CPU only, 999 = все слои на GPU
+      - N_THREADS=4         # Количество потоков CPU
+      - BATCH_SIZE=512      # Размер батча
+      - MODEL_ALIAS=local-model  # Имя модели для API
+    networks:
+      - saas-network
+    restart: unless-stopped
+    # Если есть GPU, раскомментировать:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     networks:
       - saas-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:
 
 networks:
   saas-network:
