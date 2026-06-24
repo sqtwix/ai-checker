@@ -390,13 +390,17 @@ function App() {
     if (route === "students") {
       return (
         <section className="page active" id="students" data-title="Студенты">
-          <section className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
-            <span style={{ fontSize: "48px", display: "block", marginBottom: "20px" }}>🚧</span>
-            <h2>Раздел «Студенты» в разработке</h2>
-            <p className="muted" style={{ maxWidth: "480px", margin: "0 auto", lineHeight: "1.6" }}>
-              Детальная аналитика по каждому студенту, включая выявление аномального времени прохождения и совпадения текстовых ответов, будет доступна в следующей версии.
-            </p>
-          </section>
+          <div className="panel" style={{ maxWidth: "680px", margin: "40px auto", padding: "30px", borderTop: "4px solid var(--accent-2)" }}>
+            <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
+              <span style={{ fontSize: "36px" }}>🚧</span>
+              <div>
+                <h3 style={{ margin: "0 0 10px 0", fontSize: "20px", color: "var(--text)" }}>Модуль «Студенты» находится в разработке</h3>
+                <p className="muted" style={{ margin: 0, lineHeight: "1.6" }}>
+                  Детальная аналитика по каждому студенту, включая выявление аномального времени прохождения и совпадения текстовых ответов, будет добавлена в ближайших обновлениях системы.
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
       );
     }
@@ -404,13 +408,17 @@ function App() {
     if (route === "settings") {
       return (
         <section className="page active" id="settings" data-title="Настройки">
-          <section className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
-            <span style={{ fontSize: "48px", display: "block", marginBottom: "20px" }}>⚙️</span>
-            <h2>Раздел «Настройки» в разработке</h2>
-            <p className="muted" style={{ maxWidth: "480px", margin: "0 auto", lineHeight: "1.6" }}>
-              Настройка параметров интеграции с ИИ-моделями (DeepSeek, GigaChat) и лимитов бюджета на запросы будет доступна в следующей версии.
-            </p>
-          </section>
+          <div className="panel" style={{ maxWidth: "680px", margin: "40px auto", padding: "30px", borderTop: "4px solid var(--accent-2)" }}>
+            <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
+              <span style={{ fontSize: "36px" }}>⚙️</span>
+              <div>
+                <h3 style={{ margin: "0 0 10px 0", fontSize: "20px", color: "var(--text)" }}>Модуль «Настройки» находится в разработке</h3>
+                <p className="muted" style={{ margin: 0, lineHeight: "1.6" }}>
+                  Настройка параметров интеграции с ИИ-моделями (DeepSeek, GigaChat) и лимитов бюджета на запросы будет доступна в следующей версии кабинета методиста.
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
       );
     }
@@ -525,14 +533,14 @@ function App() {
             className={route === "students" ? "active" : ""}
             style={{ display: "flex", alignItems: "center", gap: "10px" }}
           >
-            <span>◫</span> Студенты <span className="in-dev-badge">В разработке</span>
+            <span>◫</span> Студенты
           </a>
           <a
             href="#settings"
             className={route === "settings" ? "active" : ""}
             style={{ display: "flex", alignItems: "center", gap: "10px" }}
           >
-            <span>⚙</span> Настройки <span className="in-dev-badge">В разработке</span>
+            <span>⚙</span> Настройки
           </a>
         </nav>
 
