@@ -250,7 +250,7 @@ function App() {
 
               <section className="panel">
                 <p className="eyebrow">Параметры</p>
-                <h3>Модель и формат отчёта</h3>
+                <h3>Выбор ИИ-модели</h3>
                 <label className="field-label">ИИ-модель</label>
                 <div className="segmented" id="model-selector-container">
                   <button
@@ -267,13 +267,6 @@ function App() {
                   >
                     GigaChat
                   </button>
-                </div>
-
-                <label className="field-label">Экспорт</label>
-                <div className="checks">
-                  <label><input type="checkbox" defaultChecked /> Excel с подсветкой</label>
-                  <label><input type="checkbox" defaultChecked /> JSON</label>
-                  <label><input type="checkbox" /> PDF для защиты</label>
                 </div>
 
                 {showValidation && (
