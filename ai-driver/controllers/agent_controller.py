@@ -2,16 +2,7 @@ from backend.agent_manager import AgentManager
 from schemas.analysis_response import AnalysisResponse
 from schemas.analysis_request import AnalysisRequest
 from fastapi import HTTPException
-import logging
-import json
-
-# ========================= Agent Controller =========================
-
-# AgentController - класс для обработки запросов от api-core.
-# Принимает AnalysisRequest, запускает конвейер агентов,
-# валидирует ответ и возвращает AnalysisResponse.
-
-logger = logging.getLogger(__name__)
+from fastapi.responses import JSONResponse
 
 class AgentController:
     def __init__(self, agent_manager: AgentManager):

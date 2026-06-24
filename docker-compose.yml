@@ -1,4 +1,43 @@
 services:
+  api-core:
+    build:
+      context: ./api-core/ApiCore/ApiCore
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
+      - ConnectionStrings__Redis=redis:6379
+      - JwtSettings__Secret=${JWT_SECRET}
+      - JwtSettings__Issuer=${JWT_ISSUER}
+      - JwtSettings__Audience=${JWT_AUDIENCE}
+      - JwtSettings__ExpiryMinutes=${JWT_EXPIRY_MINUTES}
+      - AiDriver__Url=http://ai-driver:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - saas-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: aichecker-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s  # Проверять каждые 3 секунды
+      timeout: 3s   # Таймаут на ответ
+      retries: 10   # Сколько раз пытаться до того, как признать контейнер упавшим
+    networks:
+      - saas-network
+
   ai-driver:
     build:
       context: ./ai-driver
@@ -75,6 +114,9 @@ services:
 
 volumes:
   redis-data:
+
+volumes:
+  postgres_data:
 
 networks:
   saas-network:
