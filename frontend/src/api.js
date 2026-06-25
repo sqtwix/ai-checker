@@ -16,7 +16,7 @@ export async function request(endpoint, options = {}) {
   const token = localStorage.getItem("token");
   
   const headers = {
-    "Content-Type": "application/json",
+    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
     ...(token ? { "Authorization": `Bearer ${token}` } : {}),
     ...options.headers,
   };
@@ -62,5 +62,19 @@ export async function register(username, email, password) {
   return request("/auth/register", {
     method: "POST",
     body: JSON.stringify({ username, email, password }),
+  });
+}
+
+export async function uploadFiles(benchmarkFile, userResponseFiles, modelType) {
+  const formData = new FormData();
+  formData.append("benchmarkFile", benchmarkFile);
+  userResponseFiles.forEach((file) => {
+    formData.append("userResponseFiles", file);
+  });
+  formData.append("modelType", modelType.toLowerCase());
+
+  return request("/analysis/upload", {
+    method: "POST",
+    body: formData,
   });
 }

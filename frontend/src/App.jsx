@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register } from "./api";
+import { login, register, uploadFiles } from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -228,56 +228,69 @@ function App() {
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
 
-  const startAnalysis = () => {
+  const startAnalysis = async () => {
     if (!selectedBenchFile || selectedResponseFiles.length === 0) {
       alert("Пожалуйста, выберите эталонный файл и файлы ответов перед запуском анализа.");
       return;
     }
 
-    const taskId = "task_" + Math.random().toString(36).substring(2, 8).toUpperCase();
-    setAnalysisTaskId(taskId);
     setIsAnalyzing(true);
     setAnalysisProgress(0);
+    setAnalysisTaskId("Отправка...");
 
-    let progress = 0;
-    intervalRef.current = setInterval(() => {
-      progress += Math.floor(Math.random() * 12) + 6;
-      if (progress >= 100) {
-        progress = 100;
-        setAnalysisProgress(100);
-        clearInterval(intervalRef.current);
+    try {
+      const data = await uploadFiles(selectedBenchFile, selectedResponseFiles, selectedModel);
+      
+      const serverTaskId = data.task_id || "task_" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      setAnalysisTaskId(serverTaskId);
 
-        // Transition to newly created report detail screen after brief delay
-        setTimeout(() => {
-          const newReportId = (mockReports.length + 1).toString();
-          const cleanBenchName = selectedBenchFile.name.replace(/\.[^/.]+$/, "");
-          const cleanResponseName = selectedResponseFiles[0].name.replace(/\.[^/.]+$/, "");
-          const courseName = `${cleanBenchName} & ${cleanResponseName}${
-            selectedResponseFiles.length > 1 ? ` +${selectedResponseFiles.length - 1}` : ""
-          }`;
+      // Show success alert showing that files were successfully sent and accepted
+      alert(data.message || "Файлы успешно отправлены и приняты в обработку!");
 
-          const newReport = {
-            id: newReportId,
-            course: courseName,
-            title: "Индивидуальный анализ: " + selectedBenchFile.name,
-            errors: [
-              { priority: "high", val: "60%", question: "Вопрос q_uploaded_1", text: "Выявлены регулярные ошибки при выходе из циклов и работе со строками. Студенты склонны путать индексацию с 0 и 1." },
-              { priority: "medium", val: "35%", question: "Вопрос q_uploaded_2", text: "Обнаружено совпадение структуры решений с эталоном до мелких деталей, возможен плагиат." }
-            ],
-            recommendations: [
-              "Рекомендуется обновить тестовые задачи для снижения риска заучивания.",
-              "Провести лекционный разбор темы индексации коллекций."
-            ]
-          };
+      let progress = 0;
+      intervalRef.current = setInterval(() => {
+        progress += Math.floor(Math.random() * 12) + 6;
+        if (progress >= 100) {
+          progress = 100;
+          setAnalysisProgress(100);
+          clearInterval(intervalRef.current);
 
-          setMockReports((prev) => [...prev, newReport]);
-          resetUploadForm();
-          window.location.hash = `report-detail-${newReportId}`;
-        }, 1000);
-      } else {
-        setAnalysisProgress(progress);
-      }
-    }, 250);
+          // Transition to newly created report detail screen after brief delay
+          setTimeout(() => {
+            const newReportId = (mockReports.length + 1).toString();
+            const cleanBenchName = selectedBenchFile.name.replace(/\.[^/.]+$/, "");
+            const cleanResponseName = selectedResponseFiles[0].name.replace(/\.[^/.]+$/, "");
+            const courseName = `${cleanBenchName} & ${cleanResponseName}${
+              selectedResponseFiles.length > 1 ? ` +${selectedResponseFiles.length - 1}` : ""
+            }`;
+
+            const newReport = {
+              id: newReportId,
+              course: courseName,
+              title: "Индивидуальный анализ: " + selectedBenchFile.name,
+              errors: [
+                { priority: "high", val: "60%", question: "Вопрос q_uploaded_1", text: "Выявлены регулярные ошибки при выходе из циклов и работе со строками. Студенты склонны путать индексацию с 0 и 1." },
+                { priority: "medium", val: "35%", question: "Вопрос q_uploaded_2", text: "Обнаружено совпадение структуры решений с эталоном до мелких деталей, возможен плагиат." }
+              ],
+              recommendations: [
+                "Рекомендуется обновить тестовые задачи для снижения риска заучивания.",
+                "Провести лекционный разбор темы индексации коллекций."
+              ]
+            };
+
+            setMockReports((prev) => [...prev, newReport]);
+            resetUploadForm();
+            window.location.hash = `report-detail-${newReportId}`;
+          }, 1000);
+        } else {
+          setAnalysisProgress(progress);
+        }
+      }, 250);
+
+    } catch (err) {
+      setIsAnalyzing(false);
+      alert("Ошибка при отправке файлов: " + err.message);
+    }
   };
 
   const getTimelineStepClass = (stepIndex, currentProgress) => {
