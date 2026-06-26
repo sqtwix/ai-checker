@@ -1,26 +1,26 @@
-﻿using ApiCore.Models;
+using ApiCore.Models;
 using System.Text;
 
 namespace ApiCore.Services;
 
 public class FileParser
 {
-    public CourseBatchAnalysisRequest ParseToBatchRequest(IFormFile benchmarkFile, List<IFormFile> userResponseFiles)
+    public CourseBatchAnalysisRequest ParseToBatchRequest(string benchmarkPath, List<string> userResponsePaths)
     {
         var batchRequest = new CourseBatchAnalysisRequest
         {
             BatchId = Guid.NewGuid().ToString(),
             // Вытаскиваем имя курса из названия файла эталона (например, "ЭК 001")
-            CourseName = ExtractCourseName(benchmarkFile.FileName)
+            CourseName = ExtractCourseName(Path.GetFileName(benchmarkPath))
         };
 
         // 1. Сначала парсим общий эталонный файл в плоский словарь: "Текст Вопроса" -> "Правильный Ответ"
-        var referenceAnswersLookup = ParseBenchmarkFile(benchmarkFile);
+        var referenceAnswersLookup = ParseBenchmarkFile(benchmarkPath);
 
         // 2. Поочередно парсим каждый файл с ответами студентов по темам
-        foreach (var userFile in userResponseFiles)
+        foreach (var userPath in userResponsePaths)
         {
-            var testPayload = ParseUserResponseFile(userFile, referenceAnswersLookup);
+            var testPayload = ParseUserResponseFile(userPath, referenceAnswersLookup);
             if (testPayload != null)
             {
                 batchRequest.Tests.Add(testPayload);
@@ -30,12 +30,13 @@ public class FileParser
         return batchRequest;
     }
 
-    private Dictionary<string, string> ParseBenchmarkFile(IFormFile file)
+    private Dictionary<string, string> ParseBenchmarkFile(string filePath)
     {
         var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        using var stream = file.OpenReadStream();
-        using var reader = new StreamReader(stream, Encoding.UTF8);
+        using var stream = File.OpenRead(filePath);
+        var encoding = GetEncoding(stream);
+        using var reader = new StreamReader(stream, encoding);
 
         // Строка 1: Текст вопросов (Заголовки)
         string? headerLine = reader.ReadLine();
@@ -46,8 +47,9 @@ public class FileParser
 
         if (headerLine == null || valuesLine == null) return lookup;
 
-        var headers = ParseCsvLine(headerLine);
-        var values = ParseCsvLine(valuesLine);
+        char delimiter = headerLine.Contains(';') ? ';' : ',';
+        var headers = ParseCsvLine(headerLine, delimiter);
+        var values = ParseCsvLine(valuesLine, delimiter);
 
         for (int i = 0; i < headers.Count; i++)
         {
@@ -62,10 +64,11 @@ public class FileParser
         return lookup;
     }
 
-    private AiTestPayloadDto? ParseUserResponseFile(IFormFile file, Dictionary<string, string> referenceAnswersLookup)
+    private AiTestPayloadDto? ParseUserResponseFile(string filePath, Dictionary<string, string> referenceAnswersLookup)
     {
-        using var stream = file.OpenReadStream();
-        using var reader = new StreamReader(stream, Encoding.UTF8);
+        using var stream = File.OpenRead(filePath);
+        var encoding = GetEncoding(stream);
+        using var reader = new StreamReader(stream, encoding);
 
         // Строка 1: Заголовки (Текст вопросов повторяется раз в 4 колонки)
         string? headerLine = reader.ReadLine();
@@ -74,11 +77,12 @@ public class FileParser
 
         if (headerLine == null || subHeaderLine == null) return null;
 
-        var headers = ParseCsvLine(headerLine);
+        char delimiter = headerLine.Contains(';') ? ';' : ',';
+        var headers = ParseCsvLine(headerLine, delimiter);
 
         var testPayload = new AiTestPayloadDto
         {
-            TestName = ExtractTestName(file.FileName)
+            TestName = ExtractTestName(Path.GetFileName(filePath))
         };
 
         // Шаг A. Картируем структуру колонок вопросов.
@@ -119,7 +123,7 @@ public class FileParser
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
 
-            var fields = ParseCsvLine(line);
+            var fields = ParseCsvLine(line, delimiter);
             if (fields.Count < 4) continue;
 
             // Пропускаем технические или пустые строки, если ID пользователя не числовой
@@ -171,10 +175,7 @@ public class FileParser
         return testPayload;
     }
 
-    /// <summary>
-    /// Робастный разбор строки CSV с поддержкой экранирования кавычек и запятых внутри значений.
-    /// </summary>
-    private static List<string> ParseCsvLine(string line)
+    private static List<string> ParseCsvLine(string line, char delimiter = ',')
     {
         var result = new List<string>();
         var currentField = new StringBuilder();
@@ -195,7 +196,7 @@ public class FileParser
                     inQuotes = !inQuotes; // Переключаем режим кавычек
                 }
             }
-            else if (c == ',' && !inQuotes)
+            else if (c == delimiter && !inQuotes)
             {
                 result.Add(currentField.ToString().Trim());
                 currentField.Clear();
@@ -207,6 +208,30 @@ public class FileParser
         }
         result.Add(currentField.ToString().Trim());
         return result;
+    }
+
+    private Encoding GetEncoding(Stream stream)
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var cp1251 = System.Text.Encoding.GetEncoding(1251);
+
+        byte[] buffer = new byte[1024];
+        int bytesRead = stream.Read(buffer, 0, buffer.Length);
+        if (stream.CanSeek) stream.Position = 0;
+
+        string utf8String = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+        if (utf8String.Contains("\uFFFD"))
+        {
+            return cp1251;
+        }
+
+        string cp1251String = cp1251.GetString(buffer, 0, bytesRead);
+        if (cp1251String.Contains("Пользователь") || cp1251String.Contains("Дата") || cp1251String.Contains("Статус") || cp1251String.Contains("Правильный ответ"))
+        {
+            return cp1251;
+        }
+
+        return Encoding.UTF8;
     }
 
     private string ExtractCourseName(string fileName)

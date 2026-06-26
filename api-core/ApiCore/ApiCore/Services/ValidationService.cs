@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using ApiCore.Models;
 
 namespace ApiCore.Services;
@@ -8,78 +8,83 @@ public class ValidationService
     private readonly string[] _allowedExtensions = { ".csv", ".json" };
     private readonly string[] _requiredUserHeaders = { "Пользователь", "Дата", "Статус", "Баллы" };
 
-    public ValidationResult ValidateFiles(IFormFile benchmarkFile, List<IFormFile> userResponseFiles)
+    public ValidationResult ValidateFiles(string benchmarkPath, List<string> userResponsePaths)
     {
         var result = new ValidationResult();
 
         // 1. Проверка расширений файлов
-        ValidateExtension(benchmarkFile, "Эталонный файл", result);
-        foreach (var file in userResponseFiles)
+        ValidateExtension(benchmarkPath, "Эталонный файл", result);
+        foreach (var path in userResponsePaths)
         {
-            ValidateExtension(file, $"Файл ответов '{file.FileName}'", result);
+            ValidateExtension(path, $"Файл ответов '{Path.GetFileName(path)}'", result);
         }
 
         if (!result.IsValid) return result; // Если расширения битые, дальше проверять нет смысла
 
         // 2. Валидация структуры эталонного файла
-        ValidateBenchmarkStructure(benchmarkFile, result);
+        ValidateBenchmarkStructure(benchmarkPath, result);
 
         // 3. Валидация структуры файлов с ответами студентов
-        foreach (var file in userResponseFiles)
+        foreach (var path in userResponsePaths)
         {
-            ValidateUserResponseStructure(file, result);
+            ValidateUserResponseStructure(path, result);
         }
 
         return result;
     }
 
-    private void ValidateExtension(IFormFile file, string fileLabel, ValidationResult result)
+    private void ValidateExtension(string filePath, string fileLabel, ValidationResult result)
     {
-        var ext = Path.GetExtension(file.FileName).ToLowerSuffix();
+        var ext = Path.GetExtension(filePath).ToLowerSuffix();
         if (!_allowedExtensions.Contains(ext))
         {
             result.AddError($"{fileLabel} имеет недопустимое расширение '{ext}'. Допускаются только: .csv, .json");
         }
     }
 
-    private void ValidateBenchmarkStructure(IFormFile file, ValidationResult result)
+    private void ValidateBenchmarkStructure(string filePath, ValidationResult result)
     {
+        var fileName = Path.GetFileName(filePath);
         try
         {
-            using var stream = file.OpenReadStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var stream = File.OpenRead(filePath);
+            var encoding = GetEncoding(stream);
+            using var reader = new StreamReader(stream, encoding);
 
             var headerLine = reader.ReadLine();
             if (string.IsNullOrWhiteSpace(headerLine))
             {
-                result.AddError($"Файл эталона '{file.FileName}' пуст или поврежден.");
+                result.AddError($"Файл эталона '{fileName}' пуст или поврежден.");
                 return;
             }
 
-            // В эталоне должны быть колонки с вопросами
-            var columns = headerLine.Split(',');
+            // В эталоне должны быть колонки с вопросами (поддерживаем запятую и точку с запятой)
+            char delimiter = headerLine.Contains(';') ? ';' : ',';
+            var columns = headerLine.Split(delimiter);
             if (columns.Length < 1)
             {
-                result.AddError($"В файле эталона '{file.FileName}' не обнаружено колонок с вопросами.");
+                result.AddError($"В файле эталона '{fileName}' не обнаружено колонок с вопросами.");
             }
         }
         catch (Exception ex)
         {
-            result.AddError($"Не удалось прочитать файл эталона '{file.FileName}': {ex.Message}");
+            result.AddError($"Не удалось прочитать файл эталона '{fileName}': {ex.Message}");
         }
     }
 
-    private void ValidateUserResponseStructure(IFormFile file, ValidationResult result)
+    private void ValidateUserResponseStructure(string filePath, ValidationResult result)
     {
+        var fileName = Path.GetFileName(filePath);
         try
         {
-            using var stream = file.OpenReadStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var stream = File.OpenRead(filePath);
+            var encoding = GetEncoding(stream);
+            using var reader = new StreamReader(stream, encoding);
 
             var headerLine = reader.ReadLine();
             if (string.IsNullOrWhiteSpace(headerLine))
             {
-                result.AddError($"Файл ответов '{file.FileName}' пуст.");
+                result.AddError($"Файл ответов '{fileName}' пуст.");
                 return;
             }
 
@@ -88,22 +93,46 @@ public class ValidationService
             {
                 if (!headerLine.Contains(requiredHeader))
                 {
-                    result.AddError($"В файле '{file.FileName}' отсутствует обязательная колонка '{requiredHeader}'.");
+                    result.AddError($"В файле '{fileName}' отсутствует обязательная колонка '{requiredHeader}'.");
                 }
             }
 
             // Проверяем циклическую структуру (минимум один вопрос должен быть)
-            // На основе твоих данных: после 4 базовых колонок идут блоки вопросов
-            var columns = headerLine.Split(',');
+            char delimiter = headerLine.Contains(';') ? ';' : ',';
+            var columns = headerLine.Split(delimiter);
             if (columns.Length < 5)
             {
-                result.AddError($"Файл '{file.FileName}' содержит метаданные, но в нем нет колонок с ответами на вопросы.");
+                result.AddError($"Файл '{fileName}' содержит метаданные, но в нем нет колонок с ответами на вопросы.");
             }
         }
         catch (Exception ex)
         {
-            result.AddError($"Не удалось прочитать файл ответов '{file.FileName}': {ex.Message}");
+            result.AddError($"Не удалось прочитать файл ответов '{fileName}': {ex.Message}");
         }
+    }
+
+    private Encoding GetEncoding(Stream stream)
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var cp1251 = System.Text.Encoding.GetEncoding(1251);
+
+        byte[] buffer = new byte[1024];
+        int bytesRead = stream.Read(buffer, 0, buffer.Length);
+        if (stream.CanSeek) stream.Position = 0;
+
+        string utf8String = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+        if (utf8String.Contains("\uFFFD"))
+        {
+            return cp1251;
+        }
+
+        string cp1251String = cp1251.GetString(buffer, 0, bytesRead);
+        if (cp1251String.Contains("Пользователь") || cp1251String.Contains("Дата") || cp1251String.Contains("Статус") || cp1251String.Contains("Правильный ответ"))
+        {
+            return cp1251;
+        }
+
+        return Encoding.UTF8;
     }
 }
 

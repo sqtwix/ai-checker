@@ -17,7 +17,7 @@ echo "Port: ${SERVER_PORT:-8080}"
 echo "Context size: ${N_CTX:-8192}"
 
 # Запуск OpenAI-совместимого сервера llama.cpp
-exec /llama-server \
+exec /app/llama-server \
     -m "$MODEL_PATH" \
     --host "${SERVER_HOST:-0.0.0.0}" \
     --port "${SERVER_PORT:-8080}" \

@@ -1,4 +1,4 @@
-﻿using ApiCore.Services;
+using ApiCore.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ApiCore.Controllers;
@@ -37,9 +37,29 @@ public class AnalysisController : ControllerBase
         // 2. Генерируем уникальный ID для этой задачи анализа
         var taskId = Guid.NewGuid().ToString();
 
+        // Создаем временную папку для сохранения файлов в пределах запроса
+        var tempDir = Path.Combine(Directory.GetCurrentDirectory(), "temp_uploads", taskId);
+        Directory.CreateDirectory(tempDir);
+
+        var benchmarkPath = Path.Combine(tempDir, benchmarkFile.FileName);
+        using (var stream = new FileStream(benchmarkPath, FileMode.Create))
+        {
+            await benchmarkFile.CopyToAsync(stream);
+        }
+
+        var userResponsePaths = new List<string>();
+        foreach (var file in userResponseFiles)
+        {
+            var path = Path.Combine(tempDir, file.FileName);
+            using (var stream = new FileStream(path, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+            userResponsePaths.Add(path);
+        }
+
         // 3. Отдаем парсинг и отправку в фоновый сервис БЕЗ await, чтобы не блокировать фронтенд
-        // Использование Task.Run позволяет сразу пойти дальше и вернуть 202 Accepted
-        _ = Task.Run(() => _analysisService.ProcessAnalysisAsync(taskId, benchmarkFile, userResponseFiles, modelType));
+        _ = Task.Run(() => _analysisService.ProcessAnalysisAsync(taskId, benchmarkPath, userResponsePaths, modelType, tempDir));
 
         // Возвращаем фронту ID задачи. Фронт начнет слушать WebSocket/SignalR с этим ID
         return Accepted(new
@@ -47,5 +67,20 @@ public class AnalysisController : ControllerBase
             task_id = taskId,
             message = "Файлы успешно прошли первичную валидацию и приняты в обработку ИИ-агентами."
         });
+    }
+
+    [HttpGet("status/{taskId}")]
+    public IActionResult GetStatus(string taskId)
+    {
+        if (AnalysisService.TaskTracker.TryGetValue(taskId, out var task))
+        {
+            return Ok(new
+            {
+                status = task.Status,
+                result = task.Result,
+                error = task.Error
+            });
+        }
+        return NotFound(new { error = $"Задача с ID {taskId} не найдена." });
     }
 }
