@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register, uploadFiles } from "./api";
+import { login, register, uploadFiles, getAnalysisStatus } from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -241,51 +241,94 @@ function App() {
     try {
       const data = await uploadFiles(selectedBenchFile, selectedResponseFiles, selectedModel);
       
-      const serverTaskId = data.task_id || "task_" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const serverTaskId = data.task_id;
       setAnalysisTaskId(serverTaskId);
 
       // Show success alert showing that files were successfully sent and accepted
       alert(data.message || "Файлы успешно отправлены и приняты в обработку!");
 
       let progress = 0;
-      intervalRef.current = setInterval(() => {
-        progress += Math.floor(Math.random() * 12) + 6;
-        if (progress >= 100) {
-          progress = 100;
-          setAnalysisProgress(100);
-          clearInterval(intervalRef.current);
+      let hasCompleted = false;
 
-          // Transition to newly created report detail screen after brief delay
-          setTimeout(() => {
-            const newReportId = (mockReports.length + 1).toString();
+      // Local progress helper that goes slowly up to 90%
+      intervalRef.current = setInterval(() => {
+        if (!hasCompleted) {
+          progress += Math.floor(Math.random() * 4) + 1;
+          if (progress > 90) progress = 90;
+          setAnalysisProgress(progress);
+        }
+      }, 1000);
+
+      // Polling function
+      const poll = async () => {
+        try {
+          const statusRes = await getAnalysisStatus(serverTaskId);
+          if (statusRes.status === "Completed") {
+            hasCompleted = true;
+            clearInterval(intervalRef.current);
+            setAnalysisProgress(100);
+
+            // Construct new report based on real result from model
+            const result = statusRes.result || {};
             const cleanBenchName = selectedBenchFile.name.replace(/\.[^/.]+$/, "");
             const cleanResponseName = selectedResponseFiles[0].name.replace(/\.[^/.]+$/, "");
             const courseName = `${cleanBenchName} & ${cleanResponseName}${
               selectedResponseFiles.length > 1 ? ` +${selectedResponseFiles.length - 1}` : ""
             }`;
 
+            // Map DTO critical mass errors
+            const mappedErrors = [];
+            if (result.test_summaries) {
+              result.test_summaries.forEach((ts) => {
+                if (ts.critical_mass_errors) {
+                  ts.critical_mass_errors.forEach((err) => {
+                    mappedErrors.push({
+                      priority: err.fail_rate_percent >= 50 ? "high" : "medium",
+                      val: `${Math.round(err.fail_rate_percent)}%`,
+                      question: `${ts.test_name}: Вопрос ${err.question_id}`,
+                      text: `${err.error_pattern_description} (Причина: ${err.methodological_reason})`
+                    });
+                  });
+                }
+              });
+            }
+
+            // Map recommendations
+            const mappedRecommendations = [];
+            if (result.course_recommendations) {
+              result.course_recommendations.forEach((rec) => {
+                mappedRecommendations.push(`[${rec.priority}] ${rec.target}: ${rec.action_item}`);
+              });
+            }
+
             const newReport = {
-              id: newReportId,
+              id: serverTaskId,
               course: courseName,
-              title: "Индивидуальный анализ: " + selectedBenchFile.name,
-              errors: [
-                { priority: "high", val: "60%", question: "Вопрос q_uploaded_1", text: "Выявлены регулярные ошибки при выходе из циклов и работе со строками. Студенты склонны путать индексацию с 0 и 1." },
-                { priority: "medium", val: "35%", question: "Вопрос q_uploaded_2", text: "Обнаружено совпадение структуры решений с эталоном до мелких деталей, возможен плагиат." }
-              ],
-              recommendations: [
-                "Рекомендуется обновить тестовые задачи для снижения риска заучивания.",
-                "Провести лекционный разбор темы индексации коллекций."
-              ]
+              title: result.global_course_summary || "Успешный анализ успеваемости",
+              errors: mappedErrors,
+              recommendations: mappedRecommendations
             };
 
             setMockReports((prev) => [...prev, newReport]);
             resetUploadForm();
-            window.location.hash = `report-detail-${newReportId}`;
-          }, 1000);
-        } else {
-          setAnalysisProgress(progress);
+            window.location.hash = `report-detail-${serverTaskId}`;
+          } else if (statusRes.status === "Failed") {
+            clearInterval(intervalRef.current);
+            setIsAnalyzing(false);
+            alert("Анализ провалился на стороне сервера: " + (statusRes.error || "Неизвестная ошибка"));
+          } else {
+            // Processing... Continue polling after timeout
+            setTimeout(poll, 3000);
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+          // Retry polling in case of transient network issues
+          setTimeout(poll, 3000);
         }
-      }, 250);
+      };
+
+      // Start polling after 2 seconds
+      setTimeout(poll, 2000);
 
     } catch (err) {
       setIsAnalyzing(false);

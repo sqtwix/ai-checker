@@ -78,3 +78,7 @@ export async function uploadFiles(benchmarkFile, userResponseFiles, modelType) {
     body: formData,
   });
 }
+
+export async function getAnalysisStatus(taskId) {
+  return request(`/analysis/status/${taskId}`);
+}
