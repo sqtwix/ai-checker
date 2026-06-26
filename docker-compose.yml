@@ -80,32 +80,28 @@ services:
       context: ./llama-cpp
       dockerfile: Dockerfile
     ports:
-      - "8001:8080"  # 8001 на хосте, 8080 в контейнере
+      - "8001:8080"
     volumes:
-      # Монтируем папку с моделями
-      - ./models:/models:ro  # ro - read only, безопаснее
+      - ./models:/models:ro
     environment:
-      # Путь к модели внутри контейнера
-      - MODEL_PATH=/models/qwen3-8b.Q4_K_M.gguf
+      - MODEL_PATH=/models/Qwen3.5-0.8B-Q8_0.gguf
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
-      # Параметры производительности
-      - N_CTX=8192          # Размер контекстного окна
-      - N_GPU_LAYERS=0      # 0 = CPU only, 999 = все слои на GPU
-      - N_THREADS=4         # Количество потоков CPU
-      - BATCH_SIZE=512      # Размер батча
-      - MODEL_ALIAS=local-model  # Имя модели для API
+      - N_CTX=8192
+      - N_GPU_LAYERS=0
+      - N_THREADS=4
+      - BATCH_SIZE=512
+      - MODEL_ALIAS=local-model
+    # НАСТРОЙКА HEALTHCHECK (чтобы ai-driver не стучался в не прогретую модель)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Даем модели время загрузиться в оперативную память при старте
     networks:
       - saas-network
     restart: unless-stopped
-    # Если есть GPU, раскомментировать:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
 
   redis:
     image: redis:7-alpine
@@ -124,8 +120,6 @@ services:
 
 volumes:
   redis-data:
-
-volumes:
   postgres_data:
 
 networks:

@@ -1,5 +1,5 @@
 # Базовый образ llama.cpp с уже собранным сервером
-FROM ghcr.io/ggerganov/llama.cpp:full
+FROM ghcr.io/ggml-org/llama.cpp:server
 
 # Установка curl для healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -10,6 +10,7 @@ RUN mkdir -p /models
 
 # Копируем entrypoint скрипт если используется
 COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Healthcheck для проверки готовности сервера

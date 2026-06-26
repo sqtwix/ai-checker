@@ -1,4 +1,4 @@
-﻿using ApiCore.Models;
+using ApiCore.Models;
 using System.Text;
 using System.Text.Json;
 
@@ -57,6 +57,7 @@ public class AnalysisService
             string endpoint = modelType?.ToLower() switch
             {
                 "gigachat" or "sbergpt" => "agents/get_sbergpt_data_analysis",
+                "qwen_local" or "qwen" or "local" => "agents/get_qwen_local_data_analysis",
                 _ => "agents/get_deepseek_data_analysis"
             };
 

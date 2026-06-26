@@ -8,54 +8,51 @@ class AgentController:
     def __init__(self, agent_manager: AgentManager):
         self.agent_manager = agent_manager
 
-    def get_deepseek_data_analysis(self, input_data: AnalysisRequest) -> AnalysisResponse:
-        # Запускает анализ данных через группу агентов DeepSeek.
-        # Выполняет валидацию входных данных перед отправкой.
+    def get_deepseek_data_analysis(self, input_data: AnalysisRequest):
         try:
-            # Валидация входных данных
             self._validate_request(input_data)
-            # Запуск конвейера агентов DeepSeek
-            ai_responses = self.agent_manager.start_deepseek_processing(
-                input_data=input_data.model_dump_json()
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "Accepted",
+                    "batch_id": input_data.batch_id,
+                    "message": "Analysis started in background using DeepSeek"
+                }
             )
-            # Валидация и возврат ответа
-            return AnalysisResponse.model_validate_json(ai_responses)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail="DeepSeek response is not valid JSON: " + str(e))
+        except HTTPException as he:
+            raise he
         except Exception as e:
             raise HTTPException(status_code=500, detail="Get data from DeepSeek Error: " + str(e))
 
-    def get_sbergpt_data_analysis(self, input_data: AnalysisRequest) -> AnalysisResponse:
-        # Запускает анализ данных через группу агентов SberGPT.
-        # Выполняет валидацию входных данных перед отправкой.
+    def get_sbergpt_data_analysis(self, input_data: AnalysisRequest):
         try:
-            # Валидация входных данных
             self._validate_request(input_data)
-            # Запуск конвейера агентов SberGPT
-            ai_responses = self.agent_manager.start_sbergpt_processing(
-                input_data=input_data.model_dump_json()
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "Accepted",
+                    "batch_id": input_data.batch_id,
+                    "message": "Analysis started in background using SberGPT"
+                }
             )
-            # Валидация и возврат ответа
-            return AnalysisResponse.model_validate_json(ai_responses)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail="SberGPT response is not valid JSON: " + str(e))
+        except HTTPException as he:
+            raise he
         except Exception as e:
             raise HTTPException(status_code=500, detail="Get data from SberGPT Error: " + str(e))
 
-    def get_qwen_local_data_analysis(self, input_data: AnalysisRequest) -> AnalysisResponse:
-        # Запускает анализ данных через локальную модель Qwen.
-        # Выполняет валидацию входных данных перед отправкой.
+    def get_qwen_local_data_analysis(self, input_data: AnalysisRequest):
         try:
-            # Валидация входных данных
             self._validate_request(input_data)
-            # Запуск конвейера агентов Qwen Local
-            ai_responses = self.agent_manager.start_qwen_local_processing(
-                input_data=input_data.model_dump_json()
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "Accepted",
+                    "batch_id": input_data.batch_id,
+                    "message": "Analysis started in background using Qwen Local"
+                }
             )
-            # Валидация и возврат ответа
-            return AnalysisResponse.model_validate_json(ai_responses)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail="Qwen Local response is not valid JSON: " + str(e))
+        except HTTPException as he:
+            raise he
         except Exception as e:
             raise HTTPException(status_code=500, detail="Get data from Qwen Local Error: " + str(e))
 

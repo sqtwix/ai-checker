@@ -380,6 +380,13 @@ function App() {
                   >
                     GigaChat
                   </button>
+                  <button
+                    type="button"
+                    className={selectedModel === "Qwen_Local" ? "selected" : ""}
+                    onClick={() => setSelectedModel("Qwen_Local")}
+                  >
+                    Qwen Local
+                  </button>
                 </div>
 
                 {showValidation && (
@@ -706,15 +713,22 @@ function App() {
         <div className="sidebar-note">
           <span className="status-dot"></span>
           <p>
-            {selectedModel === "DeepSeek" ? (
+            {selectedModel === "DeepSeek" && (
               <>
                 DeepSeek активен<br />
                 <small>GigaChat готов как резерв</small>
               </>
-            ) : (
+            )}
+            {selectedModel === "GigaChat" && (
               <>
                 GigaChat активен<br />
                 <small>DeepSeek готов как резерв</small>
+              </>
+            )}
+            {selectedModel === "Qwen_Local" && (
+              <>
+                Qwen Local активен<br />
+                <small>Локальная модель</small>
               </>
             )}
           </p>
