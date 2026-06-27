@@ -64,15 +64,12 @@ input {
   color: var(--text);
 }
 
-.brand-mark {
+.brand-logo {
   width: 42px;
   height: 42px;
+  object-fit: contain;
   border-radius: var(--radius);
-  display: grid;
-  place-items: center;
-  background: var(--mint);
-  color: var(--accent);
-  font-weight: 800;
+  background: var(--surface);
 }
 
 .brand strong,
@@ -874,6 +871,24 @@ th {
   opacity: 0.55;
 }
 
+.save-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.save-actions > span {
+  padding: 0 6px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .offline-create-form {
   display: grid;
   gap: 12px;
@@ -945,5 +960,14 @@ th {
 @media (max-width: 760px) {
   .finding-editor {
     grid-template-columns: 1fr;
+  }
+
+  .save-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .save-actions button {
+    flex: 1;
   }
 }

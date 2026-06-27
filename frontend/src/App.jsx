@@ -12,6 +12,8 @@ import {
   updateOfflineReport,
   deleteOfflineReport,
 } from "./api";
+import logo from "./assets/logo.png";
+import { exportReportToPdf, exportReportToXlsx } from "./reportExport";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -560,16 +562,17 @@ function App() {
     }
   };
 
-  const downloadReportJson = (report) => {
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${report.course || "educheck-report"}.json`.replace(/[\\/:*?"<>|]+/g, "_");
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const handleExportReport = async (report, format) => {
+    try {
+      if (format === "pdf") {
+        await exportReportToPdf(report);
+        return;
+      }
+      await exportReportToXlsx(report);
+    } catch (err) {
+      console.error("Failed to export report:", err);
+      alert("Не удалось сохранить файл");
+    }
   };
 
   const getTimelineStepClass = (stepIndex, currentProgress) => {
@@ -870,9 +873,15 @@ function App() {
                   </button>
                 </>
               )}
-              <button type="button" className="secondary-button" disabled={isOfflineMode} title={isOfflineMode ? "Excel экспорт недоступен в offline mode" : ""}>Excel</button>
-              <button type="button" className="secondary-button" onClick={() => downloadReportJson(report)}>JSON</button>
-              <button type="button" className="primary-button" disabled={isOfflineMode} title={isOfflineMode ? "PDF экспорт недоступен в offline mode" : ""}>PDF</button>
+              <div className="save-actions" aria-label="Сохранить отчет">
+                <span>Сохранить</span>
+                <button type="button" className="secondary-button" onClick={() => handleExportReport(report, "xlsx")}>
+                  Excel
+                </button>
+                <button type="button" className="primary-button" onClick={() => handleExportReport(report, "pdf")}>
+                  PDF
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1155,7 +1164,7 @@ function App() {
     <div className={`app-shell`}>
       <aside className="sidebar" aria-label="Основная навигация">
         <a className="brand" href="#upload" aria-label="EduCheck AI">
-          <span className="brand-mark">E</span>
+          <img className="brand-logo" src={logo} alt="EduCheck AI" />
           <span>
             <strong>EduCheck AI</strong>
             <small>анализ ответов</small>
