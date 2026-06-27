@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register, uploadFiles, getAnalysisStatus } from "./api";
+import { login, register, uploadFiles, getAnalysisStatus, getAnalysisHistory } from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -49,7 +49,7 @@ function App() {
   const [route, setRoute] = useState(() => {
     return window.location.hash.replace("#", "") || "upload";
   });
-  const [mockReports, setMockReports] = useState(initialMockReports);
+  const [mockReports, setMockReports] = useState([]);
   const [selectedModel, setSelectedModel] = useState("DeepSeek");
   const [selectedBenchFile, setSelectedBenchFile] = useState(null);
   const [selectedResponseFiles, setSelectedResponseFiles] = useState([]);
@@ -76,6 +76,73 @@ function App() {
   const benchInputRef = useRef(null);
   const responsesInputRef = useRef(null);
   const intervalRef = useRef(null);
+
+  const mapReportFromApi = (apiReport) => {
+    const result = apiReport.result || {};
+    const mappedErrors = [];
+    if (result.test_summaries) {
+      result.test_summaries.forEach((ts) => {
+        if (ts.critical_mass_errors) {
+          ts.critical_mass_errors.forEach((err) => {
+            mappedErrors.push({
+              priority: err.fail_rate_percent >= 50 ? "high" : "medium",
+              val: `${Math.round(err.fail_rate_percent)}%`,
+              question: `${ts.test_name}: Вопрос ${err.question_id}`,
+              text: `${err.error_pattern_description} (Причина: ${err.methodological_reason})`
+            });
+          });
+        }
+      });
+    }
+
+    const mappedRecommendations = [];
+    if (result.course_recommendations) {
+      result.course_recommendations.forEach((rec) => {
+        mappedRecommendations.push(`[${rec.priority}] ${rec.target}: ${rec.action_item}`);
+      });
+    }
+
+    return {
+      id: apiReport.id,
+      course: apiReport.courseName || "Электронный курс",
+      title: result.global_course_summary || (apiReport.status === "Processing" ? "Анализ выполняется..." : "Анализ провалился"),
+      errors: mappedErrors,
+      recommendations: mappedRecommendations,
+      status: apiReport.status,
+      error: apiReport.error
+    };
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const historyData = await getAnalysisHistory();
+      if (Array.isArray(historyData)) {
+        const mapped = historyData.map(mapReportFromApi);
+        setMockReports(mapped);
+      }
+    } catch (err) {
+      console.error("Failed to fetch analysis history:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchHistory();
+    } else {
+      setMockReports([]);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    const hasProcessing = mockReports.some(r => r.status === "Processing");
+    if (!hasProcessing) return;
+
+    const interval = setInterval(() => {
+      fetchHistory();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [mockReports]);
 
   // Sync route with window hash and enforce route protection
   useEffect(() => {
@@ -301,20 +368,13 @@ function App() {
               });
             }
 
-            const newReport = {
-              id: serverTaskId,
-              course: courseName,
-              title: result.global_course_summary || "Успешный анализ успеваемости",
-              errors: mappedErrors,
-              recommendations: mappedRecommendations
-            };
-
-            setMockReports((prev) => [...prev, newReport]);
+            await fetchHistory();
             resetUploadForm();
             window.location.hash = `report-detail-${serverTaskId}`;
           } else if (statusRes.status === "Failed") {
             clearInterval(intervalRef.current);
             setIsAnalyzing(false);
+            await fetchHistory();
             alert("Анализ провалился на стороне сервера: " + (statusRes.error || "Неизвестная ошибка"));
           } else {
             // Processing... Continue polling after timeout
@@ -495,6 +555,32 @@ function App() {
             <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
               <h2>Отчёт не найден</h2>
               <p className="muted">Пожалуйста, выберите существующий отчёт из истории в левой панели.</p>
+            </div>
+          </section>
+        );
+      }
+
+      if (report.status === "Processing") {
+        return (
+          <section className="page active" id="report-detail" data-title="Детали отчёта">
+            <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: "40px", marginBottom: "20px" }}>⏳</div>
+              <h2>Анализ в процессе...</h2>
+              <p className="muted">ИИ-агенты в данный момент обрабатывают файлы ответов студентов. Пожалуйста, подождите.</p>
+            </div>
+          </section>
+        );
+      }
+
+      if (report.status === "Failed") {
+        return (
+          <section className="page active" id="report-detail" data-title="Детали отчёта">
+            <div className="panel" style={{ textAlign: "center", padding: "60px 20px", borderTop: "4px solid #ef4444" }}>
+              <div style={{ fontSize: "40px", marginBottom: "20px" }}>❌</div>
+              <h2>Анализ провалился</h2>
+              <p className="muted" style={{ color: "#ef4444", fontWeight: "500", marginTop: "10px" }}>
+                Ошибка: {report.error || "Неизвестная ошибка на стороне сервера."}
+              </p>
             </div>
           </section>
         );

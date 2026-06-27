@@ -147,6 +147,7 @@ builder.Services.AddHttpClient<AnalysisService>(client =>
 {
     var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
     client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
+    client.Timeout = TimeSpan.FromMinutes(5); // Увеличиваем таймаут для медленных CPU запусков локальных моделей
 });
 
 var app = builder.Build();
@@ -170,6 +171,21 @@ for (int retry = 0; retry < 5; retry++)
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             dbContext.Database.EnsureCreated();
+
+            // Гарантируем создание таблицы для существующих баз данных (EnsureCreated не создает новые таблицы в существующей БД)
+            dbContext.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS analysis_reports (
+                    id VARCHAR(255) PRIMARY KEY,
+                    user_id UUID NOT NULL,
+                    course_name VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    status VARCHAR(50) NOT NULL,
+                    result_json JSONB,
+                    error TEXT,
+                    CONSTRAINT fk_analysis_reports_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS ix_analysis_reports_user_id ON analysis_reports (user_id);
+            ");
         }
         Console.WriteLine(">>>> [УСПЕХ] Успешное подключение к PostgreSQL.");
         break;

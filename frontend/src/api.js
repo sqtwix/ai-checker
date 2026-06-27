@@ -82,3 +82,7 @@ export async function uploadFiles(benchmarkFile, userResponseFiles, modelType) {
 export async function getAnalysisStatus(taskId) {
   return request(`/analysis/status/${taskId}`);
 }
+
+export async function getAnalysisHistory() {
+  return request("/analysis/history");
+}

@@ -234,14 +234,14 @@ public class FileParser
         return Encoding.UTF8;
     }
 
-    private string ExtractCourseName(string fileName)
+    public static string ExtractCourseName(string fileName)
     {
         int dashIdx = fileName.IndexOf(" - ");
         if (dashIdx != -1) return fileName.Substring(0, dashIdx).Replace("Эталон ответов ", "").Trim();
         return "Электронный курс";
     }
 
-    private string ExtractTestName(string fileName)
+    public static string ExtractTestName(string fileName)
     {
         int dashIdx = fileName.IndexOf(" - ");
         if (dashIdx != -1)

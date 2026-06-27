@@ -88,10 +88,13 @@ public class ValidationService
                 return;
             }
 
+            var subHeaderLine = reader.ReadLine() ?? "";
+            var combinedHeaders = headerLine + " " + subHeaderLine;
+
             // Проверяем наличие обязательных метаданных LMS (Пользователь, Дата, Статус, Баллы)
             foreach (var requiredHeader in _requiredUserHeaders)
             {
-                if (!headerLine.Contains(requiredHeader))
+                if (!combinedHeaders.Contains(requiredHeader))
                 {
                     result.AddError($"В файле '{fileName}' отсутствует обязательная колонка '{requiredHeader}'.");
                 }

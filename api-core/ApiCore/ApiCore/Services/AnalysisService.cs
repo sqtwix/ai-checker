@@ -1,7 +1,9 @@
 using ApiCore.Models;
+using ApiCore.Data;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 
 namespace ApiCore.Services;
 /*
@@ -16,22 +18,28 @@ public class AnalysisService
     private readonly ILogger<AnalysisService> _logger;
     private readonly FileParser _fileParser;
     private readonly HttpClient _httpClient;
+    private readonly AppDbContext _dbContext;
 
     public AnalysisService(ValidationService validationService, 
         ILogger<AnalysisService> logger,
         FileParser fileParser,
-        HttpClient httpClient)  
+        HttpClient httpClient,
+        AppDbContext dbContext)  
     {
         _validationService = validationService;
         _logger = logger;
         _httpClient = httpClient;
         _fileParser = fileParser;
+        _dbContext = dbContext;
     }
 
-    public async Task ProcessAnalysisAsync(string taskId, string benchmarkPath, List<string> userResponsePaths, string modelType, string tempDir)
+    public async Task ProcessAnalysisAsync(string taskId, Guid userId, string benchmarkPath, List<string> userResponsePaths, string modelType, string tempDir)
     {
         _logger.LogInformation($"[Task {taskId}] Начало фоновой обработки пакета файлов.");
         TaskTracker[taskId] = ("Processing", null, null);
+
+        // Получаем объект отчета из базы данных
+        var report = await _dbContext.AnalysisReports.FindAsync(taskId);
 
         try
         {
@@ -42,6 +50,13 @@ public class AnalysisService
                 var errors = string.Join("; ", validation.Errors);
                 _logger.LogError($"[Task {taskId}] Фоновая валидация провалена: {errors}");
                 TaskTracker[taskId] = ("Failed", null, $"Validation failed: {errors}");
+
+                if (report != null)
+                {
+                    report.Status = "Failed";
+                    report.Error = $"Validation failed: {errors}";
+                    await _dbContext.SaveChangesAsync();
+                }
                 return;
             }
 
@@ -75,18 +90,39 @@ public class AnalysisService
                 string responseBody = await response.Content.ReadAsStringAsync();
                 var result = JsonSerializer.Deserialize<CourseBatchAnalysisResult>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 TaskTracker[taskId] = ("Completed", result, null);
+
+                if (report != null)
+                {
+                    report.Status = "Completed";
+                    report.ResultJson = responseBody;
+                    await _dbContext.SaveChangesAsync();
+                }
             }
             else
             {
                 string errorContext = await response.Content.ReadAsStringAsync();
                 _logger.LogError($"[Task {taskId}] ai-driver вернул ошибку: {response.StatusCode}. Контекст: {errorContext}");
                 TaskTracker[taskId] = ("Failed", null, $"ai-driver returned error {response.StatusCode}: {errorContext}");
+
+                if (report != null)
+                {
+                    report.Status = "Failed";
+                    report.Error = $"ai-driver returned error {response.StatusCode}: {errorContext}";
+                    await _dbContext.SaveChangesAsync();
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError($"[Task {taskId}] Критическая ошибка при обработке: {ex.Message}");
             TaskTracker[taskId] = ("Failed", null, ex.Message);
+
+            if (report != null)
+            {
+                report.Status = "Failed";
+                report.Error = ex.Message;
+                await _dbContext.SaveChangesAsync();
+            }
         }
         finally
         {

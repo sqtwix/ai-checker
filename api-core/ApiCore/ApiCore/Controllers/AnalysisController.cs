@@ -1,5 +1,8 @@
 using ApiCore.Services;
+using ApiCore.Models;
+using ApiCore.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ApiCore.Controllers;
 
@@ -14,10 +17,14 @@ namespace ApiCore.Controllers;
 public class AnalysisController : ControllerBase
 {
     private readonly AnalysisService _analysisService;
+    private readonly AppDbContext _context;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
-    public AnalysisController(AnalysisService analysisService)
+    public AnalysisController(AnalysisService analysisService, AppDbContext context, IServiceScopeFactory serviceScopeFactory)
     {
         _analysisService = analysisService;
+        _context = context;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     [HttpPost("upload")]
@@ -33,6 +40,12 @@ public class AnalysisController : ControllerBase
 
         if (userResponseFiles == null || !userResponseFiles.Any())
             return BadRequest(new { error = "Необходимо загрузить хотя бы один файл с ответами пользователей." });
+
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
 
         // 2. Генерируем уникальный ID для этой задачи анализа
         var taskId = Guid.NewGuid().ToString();
@@ -58,8 +71,27 @@ public class AnalysisController : ControllerBase
             userResponsePaths.Add(path);
         }
 
+        // Сохраняем информацию об отчете в базу данных
+        var courseName = FileParser.ExtractCourseName(benchmarkFile.FileName);
+        var report = new AnalysisReport
+        {
+            Id = taskId,
+            UserId = userId,
+            CourseName = courseName,
+            Status = "Processing",
+            CreatedAt = DateTime.UtcNow
+        };
+        _context.AnalysisReports.Add(report);
+        await _context.SaveChangesAsync();
+
         // 3. Отдаем парсинг и отправку в фоновый сервис БЕЗ await, чтобы не блокировать фронтенд
-        _ = Task.Run(() => _analysisService.ProcessAnalysisAsync(taskId, benchmarkPath, userResponsePaths, modelType, tempDir));
+        // Используем IServiceScopeFactory, чтобы scoped-зависимости (такие как AppDbContext) не уничтожались при завершении HTTP-запроса
+        _ = Task.Run(async () =>
+        {
+            using var scope = _serviceScopeFactory.CreateScope();
+            var scopedService = scope.ServiceProvider.GetRequiredService<AnalysisService>();
+            await scopedService.ProcessAnalysisAsync(taskId, userId, benchmarkPath, userResponsePaths, modelType, tempDir);
+        });
 
         // Возвращаем фронту ID задачи. Фронт начнет слушать WebSocket/SignalR с этим ID
         return Accepted(new
@@ -70,8 +102,37 @@ public class AnalysisController : ControllerBase
     }
 
     [HttpGet("status/{taskId}")]
-    public IActionResult GetStatus(string taskId)
+    public async Task<IActionResult> GetStatus(string taskId)
     {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        var report = await _context.AnalysisReports
+            .FirstOrDefaultAsync(r => r.Id == taskId && r.UserId == userId);
+
+        if (report != null)
+        {
+            CourseBatchAnalysisResult? result = null;
+            if (!string.IsNullOrEmpty(report.ResultJson))
+            {
+                result = System.Text.Json.JsonSerializer.Deserialize<CourseBatchAnalysisResult>(
+                    report.ResultJson, 
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+            }
+
+            return Ok(new
+            {
+                status = report.Status,
+                result = result,
+                error = report.Error
+            });
+        }
+
+        // Резервный поиск во временном in-memory кэше
         if (AnalysisService.TaskTracker.TryGetValue(taskId, out var task))
         {
             return Ok(new
@@ -81,6 +142,47 @@ public class AnalysisController : ControllerBase
                 error = task.Error
             });
         }
+
         return NotFound(new { error = $"Задача с ID {taskId} не найдена." });
+    }
+
+    [HttpGet("history")]
+    public async Task<IActionResult> GetHistory()
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        var reports = await _context.AnalysisReports
+            .Where(r => r.UserId == userId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        var listDto = new List<AnalysisReportDto>();
+        foreach (var report in reports)
+        {
+            CourseBatchAnalysisResult? result = null;
+            if (!string.IsNullOrEmpty(report.ResultJson))
+            {
+                result = System.Text.Json.JsonSerializer.Deserialize<CourseBatchAnalysisResult>(
+                    report.ResultJson, 
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+            }
+
+            listDto.Add(new AnalysisReportDto
+            {
+                Id = report.Id,
+                CourseName = report.CourseName,
+                CreatedAt = report.CreatedAt,
+                Status = report.Status,
+                Result = result,
+                Error = report.Error
+            });
+        }
+
+        return Ok(listDto);
     }
 }

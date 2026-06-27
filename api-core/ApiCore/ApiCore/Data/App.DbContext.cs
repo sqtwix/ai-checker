@@ -12,6 +12,9 @@ public class AppDbContext : DbContext
     // Таблица пользователей
     public DbSet<User> Users => Set<User>();
 
+    // Таблица отчетов
+    public DbSet<AnalysisReport> AnalysisReports => Set<AnalysisReport>();
+
     /// <summary>
     /// Конфигурация схемы базы данных при помощи Fluent API
     /// </summary>
@@ -26,6 +29,15 @@ public class AppDbContext : DbContext
             entity.HasIndex(u => u.Email)
                 .IsUnique()
                 .HasDatabaseName("ix_users_email");
+        });
+
+        // Настраиваем правила для сущности AnalysisReport
+        modelBuilder.Entity<AnalysisReport>(entity =>
+        {
+            entity.Property(r => r.ResultJson)
+                .HasColumnType("jsonb");
+            entity.HasIndex(r => r.UserId)
+                .HasDatabaseName("ix_analysis_reports_user_id");
         });
     }
 }
