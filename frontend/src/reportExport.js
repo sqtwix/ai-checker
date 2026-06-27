@@ -166,6 +166,13 @@ const downloadBlob = (blob, fileName) => {
   URL.revokeObjectURL(url);
 };
 
+const escapeCsvCell = (value) => {
+  const cell = String(value ?? "");
+  return `"${cell.replace(/"/g, '""')}"`;
+};
+
+const toCsvRow = (values) => values.map(escapeCsvCell).join(",");
+
 const styleWorksheetHeader = (worksheet) => {
   const headerRow = worksheet.getRow(1);
   headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -243,5 +250,46 @@ export async function exportReportToXlsx(report) {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }),
     safeFileName(report.course, "xlsx")
+  );
+}
+
+export function exportReportToCsv(report) {
+  const { errors, recommendations } = normalizeRows(report);
+  const exportDate = formatExportDate();
+  const rows = [
+    ["Summary"],
+    ["Field", "Value"],
+    ["Service", "EduCheck AI"],
+    ["Course", report.course || "Электронный курс"],
+    ["Report title", report.title || "Отчет без названия"],
+    ["Status", report.status || "Completed"],
+    ["Export date", exportDate],
+    [],
+    ["Errors"],
+    ["Priority", "Percent", "Question", "Description"],
+    ...(errors.length
+      ? errors.map((error) => [
+          error.priority || "",
+          error.val || "",
+          error.question || "",
+          error.text || "",
+        ])
+      : [["", "", "", "Критичные массовые ошибки не указаны."]]),
+    [],
+    ["Recommendations"],
+    ["#", "Recommendation"],
+    ...(recommendations.length
+      ? recommendations.map((recommendation, index) => [index + 1, recommendation])
+      : [["", "Рекомендации не указаны."]]),
+  ];
+
+  const csv = `\uFEFF${rows.map(toCsvRow).join("\n")}`;
+  downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), safeFileName(report.course, "csv"));
+}
+
+export function exportReportToJson(report) {
+  downloadBlob(
+    new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" }),
+    safeFileName(report.course, "json")
   );
 }

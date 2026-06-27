@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Pencil, Save, Trash2 } from "lucide-react";
 import {
   login,
   register,
@@ -13,7 +14,12 @@ import {
   deleteOfflineReport,
 } from "./api";
 import logo from "./assets/logo.png";
-import { exportReportToPdf, exportReportToXlsx } from "./reportExport";
+import {
+  exportReportToCsv,
+  exportReportToJson,
+  exportReportToPdf,
+  exportReportToXlsx,
+} from "./reportExport";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -100,6 +106,7 @@ function App() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [isEditingReportContent, setIsEditingReportContent] = useState(false);
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const [manualCourse, setManualCourse] = useState("Новый локальный курс");
   const [manualTitle, setManualTitle] = useState("Черновик offline-отчета");
 
@@ -191,6 +198,7 @@ function App() {
       }
       setIsEditingTitle(false); // Reset inline edit state on navigation
       setIsEditingReportContent(false);
+      setIsSaveMenuOpen(false);
       setIsMenuOpen(false); // Close mobile drawer on route change
     };
 
@@ -563,12 +571,21 @@ function App() {
   };
 
   const handleExportReport = async (report, format) => {
+    setIsSaveMenuOpen(false);
     try {
       if (format === "pdf") {
         await exportReportToPdf(report);
         return;
       }
-      await exportReportToXlsx(report);
+      if (format === "excel") {
+        await exportReportToXlsx(report);
+        return;
+      }
+      if (format === "csv") {
+        exportReportToCsv(report);
+        return;
+      }
+      exportReportToJson(report);
     } catch (err) {
       console.error("Failed to export report:", err);
       alert("Не удалось сохранить файл");
@@ -859,28 +876,50 @@ function App() {
                 <>
                   <button
                     type="button"
-                    className="secondary-button"
+                    className={`icon-action-button edit-action ${isEditingReportContent ? "active" : ""}`}
                     onClick={() => setIsEditingReportContent(!isEditingReportContent)}
+                    aria-label={isEditingReportContent ? "Завершить редактирование" : "Редактировать отчет"}
+                    title={isEditingReportContent ? "Готово" : "Редактировать"}
                   >
-                    {isEditingReportContent ? "Готово" : "Редактировать"}
+                    <Pencil size={18} strokeWidth={2.2} />
                   </button>
                   <button
                     type="button"
-                    className="ghost-button"
+                    className="icon-action-button delete-action"
                     onClick={() => handleDeleteReport(report.id)}
+                    aria-label="Удалить"
+                    title="Удалить"
                   >
-                    Удалить
+                    <Trash2 size={18} strokeWidth={2.2} />
                   </button>
                 </>
               )}
-              <div className="save-actions" aria-label="Сохранить отчет">
-                <span>Сохранить</span>
-                <button type="button" className="secondary-button" onClick={() => handleExportReport(report, "xlsx")}>
-                  Excel
+              <div className="save-actions">
+                <button
+                  type="button"
+                  className="icon-action-button save-action"
+                  onClick={() => setIsSaveMenuOpen((isOpen) => !isOpen)}
+                  aria-expanded={isSaveMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Сохранить"
+                  title="Сохранить"
+                >
+                  <Save size={18} strokeWidth={2.2} />
                 </button>
-                <button type="button" className="primary-button" onClick={() => handleExportReport(report, "pdf")}>
-                  PDF
-                </button>
+                {isSaveMenuOpen && (
+                  <div className="save-menu" role="menu">
+                    {["pdf", "excel", "csv", "json"].map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExportReport(report, format)}
+                      >
+                        {format}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

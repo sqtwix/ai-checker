@@ -871,22 +871,91 @@ th {
   opacity: 0.55;
 }
 
-.save-actions {
-  display: inline-flex;
+.export-actions {
   align-items: center;
-  gap: 8px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-soft);
 }
 
-.save-actions > span {
-  padding: 0 6px 0 8px;
-  color: var(--muted);
-  font-size: 12px;
+.icon-action-button {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.icon-action-button:hover,
+.icon-action-button.active {
+  background: var(--mint);
+  border-color: var(--accent);
+}
+
+.delete-action {
+  color: var(--danger);
+}
+
+.delete-action:hover {
+  background: #f7e6df;
+  border-color: var(--danger);
+}
+
+.save-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.save-action {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.save-action:hover {
+  background: #245a52;
+  border-color: #245a52;
+}
+
+.save-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 132px;
+  padding: 6px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.save-menu button {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
   font-weight: 700;
+  text-align: left;
   text-transform: uppercase;
+}
+
+.save-menu button:hover {
+  background: var(--mint);
+  color: var(--accent);
 }
 
 .offline-create-form {
@@ -963,11 +1032,11 @@ th {
   }
 
   .save-actions {
-    width: 100%;
-    flex-wrap: wrap;
+    width: auto;
   }
 
-  .save-actions button {
-    flex: 1;
+  .save-menu {
+    right: auto;
+    left: 0;
   }
 }
