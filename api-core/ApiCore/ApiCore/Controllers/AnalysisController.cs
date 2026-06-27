@@ -185,4 +185,35 @@ public class AnalysisController : ControllerBase
 
         return Ok(listDto);
     }
+
+    [HttpPut("rename/{taskId}")]
+    public async Task<IActionResult> RenameReport(string taskId, [FromBody] RenameReportRequest request)
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { error = "Название не может быть пустым." });
+        }
+
+        var report = await _context.AnalysisReports.FirstOrDefaultAsync(r => r.Id == taskId && r.UserId == userId);
+        if (report == null)
+        {
+            return NotFound(new { error = "Отчет не найден." });
+        }
+
+        report.CourseName = request.Name.Trim();
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Отчет успешно переименован.", courseName = report.CourseName });
+    }
+}
+
+public class RenameReportRequest
+{
+    public string Name { get; set; } = string.Empty;
 }

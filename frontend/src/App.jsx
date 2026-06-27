@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register, uploadFiles, getAnalysisStatus, getAnalysisHistory } from "./api";
+import { login, register, uploadFiles, getAnalysisStatus, getAnalysisHistory, renameAnalysisReport } from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -76,6 +76,15 @@ function App() {
   const benchInputRef = useRef(null);
   const responsesInputRef = useRef(null);
   const intervalRef = useRef(null);
+
+  // Naming & Renaming states
+  const [showNamingModal, setShowNamingModal] = useState(false);
+  const [namingTaskId, setNamingTaskId] = useState("");
+  const [namingValue, setNamingValue] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
 
   const mapReportFromApi = (apiReport) => {
     const result = apiReport.result || {};
@@ -159,6 +168,7 @@ function App() {
       } else {
         setRoute(newRoute);
       }
+      setIsEditingTitle(false); // Reset inline edit state on navigation
       setIsMenuOpen(false); // Close mobile drawer on route change
     };
 
@@ -368,9 +378,10 @@ function App() {
               });
             }
 
-            await fetchHistory();
+            setNamingTaskId(serverTaskId);
+            setNamingValue(courseName);
+            setShowNamingModal(true);
             resetUploadForm();
-            window.location.hash = `report-detail-${serverTaskId}`;
           } else if (statusRes.status === "Failed") {
             clearInterval(intervalRef.current);
             setIsAnalyzing(false);
@@ -393,6 +404,45 @@ function App() {
     } catch (err) {
       setIsAnalyzing(false);
       alert("Ошибка при отправке файлов: " + err.message);
+    }
+  };
+
+  const handleSaveReportName = async (e) => {
+    if (e) e.preventDefault();
+    if (!namingValue.trim()) {
+      alert("Пожалуйста, введите название отчета.");
+      return;
+    }
+    setIsSavingName(true);
+    try {
+      await renameAnalysisReport(namingTaskId, namingValue);
+      await fetchHistory();
+      setShowNamingModal(false);
+      window.location.hash = `report-detail-${namingTaskId}`;
+    } catch (err) {
+      alert("Не удалось сохранить название: " + err.message);
+    } finally {
+      setIsSavingName(false);
+    }
+  };
+
+  const handleSkipNaming = async () => {
+    setShowNamingModal(false);
+    await fetchHistory();
+    window.location.hash = `report-detail-${namingTaskId}`;
+  };
+
+  const handleInlineRenameSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!editTitleValue.trim()) return;
+
+    const reportId = route.replace("report-detail-", "");
+    try {
+      await renameAnalysisReport(reportId, editTitleValue);
+      await fetchHistory();
+      setIsEditingTitle(false);
+    } catch (err) {
+      alert("Не удалось переименовать отчет: " + err.message);
     }
   };
 
@@ -590,7 +640,63 @@ function App() {
         <section className="page active" id="report-detail" data-title="Детали отчёта">
           <div className="report-header">
             <div>
-              <p className="eyebrow" id="report-course-eyebrow">{report.course}</p>
+              {isEditingTitle ? (
+                <form onSubmit={handleInlineRenameSubmit} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                  <input
+                    type="text"
+                    value={editTitleValue}
+                    onChange={(e) => setEditTitleValue(e.target.value)}
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      backgroundColor: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      color: "var(--text)",
+                      fontSize: "14px",
+                      minWidth: "240px",
+                      outline: "none"
+                    }}
+                    required
+                    autoFocus
+                  />
+                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px", border: 0 }}>
+                    Сохранить
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => setIsEditingTitle(false)}
+                    style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}
+                  >
+                    Отмена
+                  </button>
+                </form>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                  <p className="eyebrow" id="report-course-eyebrow" style={{ margin: 0 }}>{report.course}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditTitleValue(report.course);
+                      setIsEditingTitle(true);
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      padding: 0,
+                      opacity: 0.6,
+                      transition: "opacity 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.target.style.opacity = 1}
+                    onMouseLeave={(e) => e.target.style.opacity = 0.6}
+                    title="Переименовать отчет"
+                  >
+                    ✏️
+                  </button>
+                </div>
+              )}
               <h2 id="report-title-heading">{report.title}</h2>
             </div>
             <div className="export-actions">
@@ -904,6 +1010,84 @@ function App() {
 
         {renderActivePage()}
       </main>
+
+      {/* Modal Dialog for saving report name */}
+      {showNamingModal && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.6)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999,
+          padding: "16px"
+        }}>
+          <div style={{
+            backgroundColor: "var(--panel-bg)",
+            border: "1px solid var(--border)",
+            borderRadius: "16px",
+            padding: "28px",
+            width: "100%",
+            maxWidth: "480px",
+            boxShadow: "0 20px 40px rgba(0, 0, 0, 0.4)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "24px" }}>💾</span>
+              <h3 style={{ margin: 0, fontSize: "1.3rem", color: "var(--text)" }}>Назовите ваш анализ</h3>
+            </div>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              Сохраните этот анализ под понятным именем в вашей истории отчетов, чтобы легко находить его позже.
+            </p>
+            <form onSubmit={handleSaveReportName} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <input
+                type="text"
+                value={namingValue}
+                onChange={(e) => setNamingValue(e.target.value)}
+                placeholder="Например, Контрольная работа 1"
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "8px",
+                  backgroundColor: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  color: "var(--text)",
+                  outline: "none",
+                  fontSize: "14px"
+                }}
+                required
+                autoFocus
+              />
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "8px" }}>
+                <button
+                  type="button"
+                  onClick={handleSkipNaming}
+                  disabled={isSavingName}
+                  className="ghost-button"
+                  style={{ minHeight: "40px", padding: "8px 16px" }}
+                >
+                  Пропустить
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingName}
+                  className="primary-button"
+                  style={{ minHeight: "40px", padding: "8px 20px" }}
+                >
+                  {isSavingName ? "Сохранение..." : "Сохранить"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
