@@ -1,5 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register, uploadFiles, getAnalysisStatus, getAnalysisHistory, renameAnalysisReport } from "./api";
+import {
+  login,
+  register,
+  uploadFiles,
+  getAnalysisStatus,
+  getAnalysisHistory,
+  renameAnalysisReport,
+  isOfflineMode,
+  seedOfflineReports,
+  createOfflineReport,
+  updateOfflineReport,
+  deleteOfflineReport,
+} from "./api";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -85,6 +97,9 @@ function App() {
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const [isEditingReportContent, setIsEditingReportContent] = useState(false);
+  const [manualCourse, setManualCourse] = useState("Новый локальный курс");
+  const [manualTitle, setManualTitle] = useState("Черновик offline-отчета");
 
   const mapReportFromApi = (apiReport) => {
     const result = apiReport.result || {};
@@ -126,13 +141,17 @@ function App() {
     try {
       const historyData = await getAnalysisHistory();
       if (Array.isArray(historyData)) {
-        const mapped = historyData.map(mapReportFromApi);
+        const mapped = isOfflineMode ? historyData : historyData.map(mapReportFromApi);
         setMockReports(mapped);
       }
     } catch (err) {
       console.error("Failed to fetch analysis history:", err);
     }
   };
+
+  useEffect(() => {
+    seedOfflineReports(initialMockReports);
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -169,6 +188,7 @@ function App() {
         setRoute(newRoute);
       }
       setIsEditingTitle(false); // Reset inline edit state on navigation
+      setIsEditingReportContent(false);
       setIsMenuOpen(false); // Close mobile drawer on route change
     };
 
@@ -446,6 +466,112 @@ function App() {
     }
   };
 
+  const persistOfflineReport = (reportId, patch) => {
+    setMockReports((reports) =>
+      reports.map((report) => (report.id === reportId ? { ...report, ...patch } : report))
+    );
+    updateOfflineReport(reportId, patch).catch((err) => {
+      alert("Не удалось сохранить локальные изменения: " + err.message);
+    });
+  };
+
+  const handleReportFieldChange = (reportId, field, value) => {
+    persistOfflineReport(reportId, { [field]: value });
+  };
+
+  const handleFindingChange = (report, index, field, value) => {
+    const nextErrors = report.errors.map((error, currentIndex) =>
+      currentIndex === index ? { ...error, [field]: value } : error
+    );
+    persistOfflineReport(report.id, { errors: nextErrors });
+  };
+
+  const addFinding = (report) => {
+    persistOfflineReport(report.id, {
+      errors: [
+        ...report.errors,
+        {
+          priority: "medium",
+          val: "25%",
+          question: "Новый вопрос",
+          text: "Опишите найденную массовую ошибку.",
+        },
+      ],
+    });
+  };
+
+  const removeFinding = (report, index) => {
+    persistOfflineReport(report.id, {
+      errors: report.errors.filter((_, currentIndex) => currentIndex !== index),
+    });
+  };
+
+  const handleRecommendationChange = (report, index, value) => {
+    const nextRecommendations = report.recommendations.map((recommendation, currentIndex) =>
+      currentIndex === index ? value : recommendation
+    );
+    persistOfflineReport(report.id, { recommendations: nextRecommendations });
+  };
+
+  const addRecommendation = (report) => {
+    persistOfflineReport(report.id, {
+      recommendations: [...report.recommendations, "Новая рекомендация для методиста."],
+    });
+  };
+
+  const removeRecommendation = (report, index) => {
+    persistOfflineReport(report.id, {
+      recommendations: report.recommendations.filter((_, currentIndex) => currentIndex !== index),
+    });
+  };
+
+  const handleCreateManualReport = async (e) => {
+    e.preventDefault();
+    try {
+      const report = await createOfflineReport({
+        course: manualCourse.trim() || "Новый локальный курс",
+        title: manualTitle.trim() || "Черновик offline-отчета",
+        errors: [
+          {
+            priority: "medium",
+            val: "30%",
+            question: "Вопрос q_demo",
+            text: "Черновая находка для ручного редактирования в песочнице.",
+          },
+        ],
+        recommendations: ["Уточните содержание отчета в редакторе offline mode."],
+      });
+      await fetchHistory();
+      window.location.hash = `report-detail-${report.id}`;
+    } catch (err) {
+      alert("Не удалось создать локальный отчет: " + err.message);
+    }
+  };
+
+  const handleDeleteReport = async (reportId) => {
+    if (!window.confirm("Удалить этот локальный отчет?")) return;
+    try {
+      await deleteOfflineReport(reportId);
+      await fetchHistory();
+      setIsEditingReportContent(false);
+      window.location.hash = "upload";
+    } catch (err) {
+      alert("Не удалось удалить локальный отчет: " + err.message);
+    }
+  };
+
+  const downloadReportJson = (report) => {
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${report.course || "educheck-report"}.json`.replace(/[\\/:*?"<>|]+/g, "_");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const getTimelineStepClass = (stepIndex, currentProgress) => {
     const thresholds = [0, 25, 50, 75];
     if (currentProgress >= thresholds[stepIndex]) {
@@ -557,6 +683,32 @@ function App() {
                 >
                   Запустить анализ
                 </button>
+
+                {isOfflineMode && (
+                  <form className="offline-create-form" onSubmit={handleCreateManualReport}>
+                    <p className="eyebrow">Offline песочница</p>
+                    <h3>Создать отчет вручную</h3>
+                    <label>
+                      Название курса
+                      <input
+                        type="text"
+                        value={manualCourse}
+                        onChange={(e) => setManualCourse(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Заголовок отчета
+                      <textarea
+                        rows="3"
+                        value={manualTitle}
+                        onChange={(e) => setManualTitle(e.target.value)}
+                      />
+                    </label>
+                    <button type="submit" className="secondary-button wide">
+                      Создать черновик
+                    </button>
+                  </form>
+                )}
               </section>
             </div>
           ) : (
@@ -578,15 +730,15 @@ function App() {
                 </div>
                 <div id="step-2" className={getTimelineStepClass(1, analysisProgress)}>
                   <b>Данные приведены к JSON</b>
-                  <p>api-core подготовил структуру для ai-driver.</p>
+                  <p>{isOfflineMode ? "Offline mode подготовил локальную структуру отчета." : "api-core подготовил структуру для ai-driver."}</p>
                 </div>
                 <div id="step-3" className={getTimelineStepClass(2, analysisProgress)}>
                   <b>ИИ-агенты анализируют паттерны</b>
-                  <p>Статистик проверяет время, методист ищет типовые ошибки.</p>
+                  <p>{isOfflineMode ? "Создается шаблонный демо-результат для проверки интерфейса." : "Статистик проверяет время, методист ищет типовые ошибки."}</p>
                 </div>
                 <div id="step-4" className={getTimelineStepClass(3, analysisProgress)}>
                   <b>Формируется отчёт</b>
-                  <p>Excel, JSON и PDF будут готовы после завершения.</p>
+                  <p>{isOfflineMode ? "JSON будет доступен локально после завершения." : "Excel, JSON и PDF будут готовы после завершения."}</p>
                 </div>
               </div>
             </div>
@@ -700,37 +852,155 @@ function App() {
               <h2 id="report-title-heading">{report.title}</h2>
             </div>
             <div className="export-actions">
-              <button type="button" className="secondary-button">Excel</button>
-              <button type="button" className="secondary-button">JSON</button>
-              <button type="button" className="primary-button">PDF</button>
+              {isOfflineMode && (
+                <>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setIsEditingReportContent(!isEditingReportContent)}
+                  >
+                    {isEditingReportContent ? "Готово" : "Редактировать"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => handleDeleteReport(report.id)}
+                  >
+                    Удалить
+                  </button>
+                </>
+              )}
+              <button type="button" className="secondary-button" disabled={isOfflineMode} title={isOfflineMode ? "Excel экспорт недоступен в offline mode" : ""}>Excel</button>
+              <button type="button" className="secondary-button" onClick={() => downloadReportJson(report)}>JSON</button>
+              <button type="button" className="primary-button" disabled={isOfflineMode} title={isOfflineMode ? "PDF экспорт недоступен в offline mode" : ""}>PDF</button>
             </div>
           </div>
 
-          <div className="grid two">
-            <section className="panel">
-              <h3>Критичные массовые ошибки</h3>
-              <div id="report-errors-container">
-                {report.errors.map((err, i) => (
-                  <article key={i} className="finding">
-                    <span className={`priority ${err.priority}`}>{err.val}</span>
-                    <div>
-                      <b>{err.question}</b>
-                      <p>{err.text}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+          {isEditingReportContent && isOfflineMode ? (
+            <div className="grid two">
+              <section className="panel report-editor">
+                <h3>Содержание отчета</h3>
+                <label>
+                  Название курса
+                  <input
+                    type="text"
+                    value={report.course}
+                    onChange={(e) => handleReportFieldChange(report.id, "course", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Заголовок отчета
+                  <textarea
+                    rows="4"
+                    value={report.title}
+                    onChange={(e) => handleReportFieldChange(report.id, "title", e.target.value)}
+                  />
+                </label>
+              </section>
 
-            <section className="panel">
-              <h3>Рекомендации</h3>
-              <ul className="recommendations" id="report-recommendations-list">
-                {report.recommendations.map((rec, i) => (
-                  <li key={i}>{rec}</li>
-                ))}
-              </ul>
-            </section>
-          </div>
+              <section className="panel report-editor">
+                <div className="section-heading">
+                  <h3>Рекомендации</h3>
+                  <button type="button" className="secondary-button" onClick={() => addRecommendation(report)}>
+                    Добавить
+                  </button>
+                </div>
+                <div className="editor-list">
+                  {report.recommendations.map((rec, i) => (
+                    <div key={i} className="editor-row">
+                      <textarea
+                        rows="3"
+                        value={rec}
+                        onChange={(e) => handleRecommendationChange(report, i, e.target.value)}
+                      />
+                      <button type="button" className="ghost-button" onClick={() => removeRecommendation(report, i)}>
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel report-editor editor-wide">
+                <div className="section-heading">
+                  <h3>Критичные массовые ошибки</h3>
+                  <button type="button" className="secondary-button" onClick={() => addFinding(report)}>
+                    Добавить
+                  </button>
+                </div>
+                <div className="editor-list">
+                  {report.errors.map((err, i) => (
+                    <div key={i} className="finding-editor">
+                      <label>
+                        Приоритет
+                        <select
+                          value={err.priority}
+                          onChange={(e) => handleFindingChange(report, i, "priority", e.target.value)}
+                        >
+                          <option value="high">high</option>
+                          <option value="medium">medium</option>
+                          <option value="low">low</option>
+                        </select>
+                      </label>
+                      <label>
+                        Процент
+                        <input
+                          type="text"
+                          value={err.val}
+                          onChange={(e) => handleFindingChange(report, i, "val", e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Вопрос
+                        <input
+                          type="text"
+                          value={err.question}
+                          onChange={(e) => handleFindingChange(report, i, "question", e.target.value)}
+                        />
+                      </label>
+                      <label className="editor-wide">
+                        Описание
+                        <textarea
+                          rows="3"
+                          value={err.text}
+                          onChange={(e) => handleFindingChange(report, i, "text", e.target.value)}
+                        />
+                      </label>
+                      <button type="button" className="ghost-button" onClick={() => removeFinding(report, i)}>
+                        Удалить ошибку
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="grid two">
+              <section className="panel">
+                <h3>Критичные массовые ошибки</h3>
+                <div id="report-errors-container">
+                  {report.errors.map((err, i) => (
+                    <article key={i} className="finding">
+                      <span className={`priority ${err.priority}`}>{err.val}</span>
+                      <div>
+                        <b>{err.question}</b>
+                        <p>{err.text}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel">
+                <h3>Рекомендации</h3>
+                <ul className="recommendations" id="report-recommendations-list">
+                  {report.recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+          )}
         </section>
       );
     }
@@ -948,6 +1218,12 @@ function App() {
         <div className="sidebar-note">
           <span className="status-dot"></span>
           <p>
+            {isOfflineMode && (
+              <>
+                Offline mode<br />
+                <small>Backend не используется</small><br />
+              </>
+            )}
             {selectedModel === "DeepSeek" && (
               <>
                 DeepSeek активен<br />

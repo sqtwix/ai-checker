@@ -866,3 +866,84 @@ th {
   background: var(--accent);
   color: white;
 }
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.offline-create-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.offline-create-form h3 {
+  margin-bottom: 0;
+}
+
+.offline-create-form label,
+.report-editor label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.offline-create-form input,
+.offline-create-form textarea,
+.report-editor input,
+.report-editor textarea,
+.report-editor select {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--text);
+  resize: vertical;
+}
+
+.report-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.editor-list {
+  display: grid;
+  gap: 14px;
+}
+
+.editor-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.finding-editor {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.6fr) minmax(110px, 0.45fr) minmax(180px, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.editor-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .finding-editor {
+    grid-template-columns: 1fr;
+  }
+}
