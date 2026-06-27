@@ -698,7 +698,7 @@ function App() {
                 <button
                   className="primary-button wide"
                   id="start-analysis-btn"
-                  style={{ marginTop: "20px", border: 0, width: "100%" }}
+                  style={{ marginTop: "20px", width: "100%" }}
                   onClick={startAnalysis}
                 >
                   Запустить анализ
@@ -831,7 +831,7 @@ function App() {
                     required
                     autoFocus
                   />
-                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px", border: 0 }}>
+                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}>
                     Сохранить
                   </button>
                   <button
@@ -848,24 +848,15 @@ function App() {
                   <p className="eyebrow" id="report-course-eyebrow" style={{ margin: 0 }}>{report.course}</p>
                   <button
                     type="button"
+                    className="inline-icon-button"
                     onClick={() => {
                       setEditTitleValue(report.course);
                       setIsEditingTitle(true);
                     }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      padding: 0,
-                      opacity: 0.6,
-                      transition: "opacity 0.2s"
-                    }}
-                    onMouseEnter={(e) => e.target.style.opacity = 1}
-                    onMouseLeave={(e) => e.target.style.opacity = 0.6}
+                    aria-label="Переименовать отчет"
                     title="Переименовать отчет"
                   >
-                    ✏️
+                    <Pencil size={14} strokeWidth={2.2} />
                   </button>
                 </div>
               )}
@@ -1119,7 +1110,6 @@ function App() {
             <button
               type="submit"
               className="primary-button wide"
-              style={{ border: 0 }}
             >
               Войти
             </button>
@@ -1169,7 +1159,6 @@ function App() {
             <button
               type="submit"
               className="primary-button wide"
-              style={{ border: 0 }}
             >
               Зарегистрироваться
             </button>
