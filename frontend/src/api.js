@@ -82,3 +82,14 @@ export async function uploadFiles(benchmarkFile, userResponseFiles, modelType) {
 export async function getAnalysisStatus(taskId) {
   return request(`/analysis/status/${taskId}`);
 }
+
+export async function getAnalysisHistory() {
+  return request("/analysis/history");
+}
+
+export async function renameAnalysisReport(taskId, newName) {
+  return request(`/analysis/rename/${taskId}`, {
+    method: "PUT",
+    body: JSON.stringify({ name: newName }),
+  });
+}
