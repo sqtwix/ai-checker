@@ -1,6 +1,8 @@
 # Stage 1: Build the React application
 FROM node:20-alpine AS build
 WORKDIR /app
+ARG VITE_OFFLINE_MODE=false
+ENV VITE_OFFLINE_MODE=$VITE_OFFLINE_MODE
 COPY package*.json ./
 RUN npm install
 COPY . .

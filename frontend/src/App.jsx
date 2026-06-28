@@ -1,5 +1,30 @@
 import { useState, useEffect, useRef } from "react";
-import { login, register, uploadFiles, getAnalysisStatus, getAnalysisHistory, renameAnalysisReport } from "./api";
+import { Clock3, Files, Pencil, Save, Trash2, Upload, XCircle } from "lucide-react";
+import {
+  login,
+  register,
+  uploadFiles,
+  getAnalysisStatus,
+  getAnalysisHistory,
+  renameAnalysisReport,
+  isOfflineMode,
+  seedOfflineReports,
+  createOfflineReport,
+  updateOfflineReport,
+  deleteOfflineReport,
+} from "./api";
+import { AppLayout } from "./components/Layout";
+import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
+import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
+import { AuthPage, ComingSoonPage, SettingsPage } from "./components/Pages";
+import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
+import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
+import {
+  exportReportToCsv,
+  exportReportToJson,
+  exportReportToPdf,
+  exportReportToXlsx,
+} from "./reportExport";
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -58,10 +83,17 @@ function App() {
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisTaskId, setAnalysisTaskId] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [toasts, setToasts] = useState([]);
+  const [deleteTargetId, setDeleteTargetId] = useState("");
+  const [userSettings, setUserSettings] = useState(() => readLocalSettings());
+  const [layoutPreferences, setLayoutPreferences] = useState(() => readLayoutPreferences());
+  const [systemThemeTick, setSystemThemeTick] = useState(0);
 
   // Authentication states
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
   const [user, setUser] = useState(() => localStorage.getItem("username") || "");
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem("userEmail") || "");
   const [authError, setAuthError] = useState("");
 
   // Login form states
@@ -76,6 +108,8 @@ function App() {
   const benchInputRef = useRef(null);
   const responsesInputRef = useRef(null);
   const intervalRef = useRef(null);
+  const saveActionsRef = useRef(null);
+  const profileActionsRef = useRef(null);
 
   // Naming & Renaming states
   const [showNamingModal, setShowNamingModal] = useState(false);
@@ -85,6 +119,94 @@ function App() {
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const [isEditingReportContent, setIsEditingReportContent] = useState(false);
+
+  const updateLayoutPreferences = (patch) => {
+    setLayoutPreferences((currentPreferences) => ({
+      ...currentPreferences,
+      ...patch,
+    }));
+  };
+
+  const handleMainSidebarToggle = () => {
+    updateLayoutPreferences({
+      isMainSidebarCollapsed: !layoutPreferences.isMainSidebarCollapsed,
+    });
+  };
+
+  const handleSettingsSidebarToggle = () => {
+    updateLayoutPreferences({
+      isSettingsSidebarCollapsed: !layoutPreferences.isSettingsSidebarCollapsed,
+    });
+  };
+
+  const handleSidebarResizeStart = (panel, event) => {
+    if (window.matchMedia?.("(max-width: 980px)")?.matches) return;
+
+    event.preventDefault();
+    const limits = layoutLimits[panel];
+    const panelLeft = event.currentTarget.parentElement?.getBoundingClientRect().left || 0;
+
+    const handlePointerMove = (moveEvent) => {
+      const nextWidth = moveEvent.clientX - panelLeft;
+
+      if (nextWidth < limits.collapseBelow) {
+        updateLayoutPreferences(
+          panel === "main"
+            ? { isMainSidebarCollapsed: true }
+            : { isSettingsSidebarCollapsed: true }
+        );
+        return;
+      }
+
+      const maxWidth = getSidebarMaxWidth(limits);
+      const clampedWidth = Math.min(maxWidth, Math.max(limits.min, nextWidth));
+      updateLayoutPreferences(
+        panel === "main"
+          ? { mainSidebarWidth: clampedWidth, isMainSidebarCollapsed: false }
+          : { settingsSidebarWidth: clampedWidth, isSettingsSidebarCollapsed: false }
+      );
+    };
+
+    const handlePointerUp = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+      document.removeEventListener("pointercancel", handlePointerUp);
+      document.body.classList.remove("is-resizing-sidebar");
+    };
+
+    document.body.classList.add("is-resizing-sidebar");
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp, { once: true });
+    document.addEventListener("pointercancel", handlePointerUp, { once: true });
+  };
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [manualCourse, setManualCourse] = useState("Новый локальный курс");
+  const [manualTitle, setManualTitle] = useState("Черновик offline-отчета");
+
+  const notify = (toast) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((currentToasts) => [...currentToasts, { id, type: "info", ...toast }]);
+    window.setTimeout(() => {
+      setToasts((currentToasts) => currentToasts.filter((currentToast) => currentToast.id !== id));
+    }, toast.duration || 4200);
+  };
+
+  const dismissToast = (toastId) => {
+    setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
+  };
+
+  const handleSettingsChange = async (patch) => {
+    const nextSettings = {
+      ...userSettings,
+      ...patch,
+    };
+    setUserSettings(nextSettings);
+
+    const { settings } = await persistUserSettings(nextSettings);
+    setUserSettings(settings);
+  };
 
   const mapReportFromApi = (apiReport) => {
     const result = apiReport.result || {};
@@ -126,7 +248,7 @@ function App() {
     try {
       const historyData = await getAnalysisHistory();
       if (Array.isArray(historyData)) {
-        const mapped = historyData.map(mapReportFromApi);
+        const mapped = isOfflineMode ? historyData : historyData.map(mapReportFromApi);
         setMockReports(mapped);
       }
     } catch (err) {
@@ -135,12 +257,73 @@ function App() {
   };
 
   useEffect(() => {
+    seedOfflineReports(initialMockReports);
+  }, []);
+
+  useEffect(() => {
     if (token) {
       fetchHistory();
     } else {
       setMockReports([]);
     }
   }, [token]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const syncSettings = async () => {
+      const { settings } = token
+        ? await loadUserSettings()
+        : { settings: readLocalSettings() };
+
+      if (!ignore) {
+        setUserSettings(settings);
+      }
+    };
+
+    syncSettings();
+
+    return () => {
+      ignore = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    writeLayoutPreferences(layoutPreferences);
+  }, [layoutPreferences]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const isSystemDark =
+      userSettings.theme === "system" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+    const effectiveTheme = userSettings.theme === "system"
+      ? (isSystemDark ? "dark" : "light")
+      : userSettings.theme;
+
+    root.dataset.theme = effectiveTheme;
+    root.dataset.themePreference = userSettings.theme;
+    const accessibility = userSettings.accessibility || {};
+    root.dataset.accessibility = accessibility.enabled ? "enabled" : "default";
+    root.dataset.fontSize = accessibility.enabled ? (accessibility.fontSize || "xxlarge") : "normal";
+    root.dataset.contrast = accessibility.enabled ? (accessibility.colorScheme || "dark") : "standard";
+    root.dataset.lineSpacing = accessibility.enabled ? "wide" : "normal";
+    root.dataset.letterSpacing = accessibility.enabled ? "wide" : "normal";
+    root.dataset.density = userSettings.minimalUi ? "minimal" : "comfortable";
+    document.body.dataset.density = root.dataset.density;
+  }, [userSettings, systemThemeTick]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mediaQuery) return;
+
+    const handleSystemThemeChange = () => {
+      setSystemThemeTick((tick) => tick + 1);
+    };
+
+    mediaQuery.addEventListener("change", handleSystemThemeChange);
+    return () => mediaQuery.removeEventListener("change", handleSystemThemeChange);
+  }, []);
 
   useEffect(() => {
     const hasProcessing = mockReports.some(r => r.status === "Processing");
@@ -169,6 +352,9 @@ function App() {
         setRoute(newRoute);
       }
       setIsEditingTitle(false); // Reset inline edit state on navigation
+      setIsEditingReportContent(false);
+      setIsSaveMenuOpen(false);
+      setIsProfileMenuOpen(false);
       setIsMenuOpen(false); // Close mobile drawer on route change
     };
 
@@ -198,6 +384,30 @@ function App() {
     document.title = "EduCheck AI — личный кабинет";
   }, []);
 
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      const isOutsideSaveMenu = isSaveMenuOpen && !saveActionsRef.current?.contains(event.target);
+      const isOutsideProfileMenu = isProfileMenuOpen && !profileActionsRef.current?.contains(event.target);
+
+      if (!isOutsideSaveMenu && !isOutsideProfileMenu) return;
+
+      if (isOutsideSaveMenu) {
+        setIsSaveMenuOpen(false);
+      }
+      if (isOutsideProfileMenu) {
+        setIsProfileMenuOpen(false);
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent?.stopImmediatePropagation?.();
+      event.stopImmediatePropagation?.();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [isSaveMenuOpen, isProfileMenuOpen]);
+
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setAuthError("");
@@ -209,8 +419,10 @@ function App() {
       if (data && data.token) {
         localStorage.setItem("token", data.token);
         localStorage.setItem("username", data.username);
+        localStorage.setItem("userEmail", loginEmail);
         setToken(data.token);
         setUser(data.username);
+        setUserEmail(loginEmail);
         setLoginEmail("");
         setLoginPassword("");
         window.location.hash = "upload";
@@ -236,8 +448,10 @@ function App() {
       if (data && data.token) {
         localStorage.setItem("token", data.token);
         localStorage.setItem("username", data.username);
+        localStorage.setItem("userEmail", registerEmail);
         setToken(data.token);
         setUser(data.username);
+        setUserEmail(registerEmail);
         setRegisterUsername("");
         setRegisterEmail("");
         setRegisterPassword("");
@@ -251,10 +465,13 @@ function App() {
   };
 
   const handleLogout = () => {
+    setIsProfileMenuOpen(false);
     localStorage.removeItem("token");
     localStorage.removeItem("username");
+    localStorage.removeItem("userEmail");
     setToken("");
     setUser("");
+    setUserEmail("");
     setRoute("login");
     window.location.hash = "login";
   };
@@ -307,7 +524,11 @@ function App() {
 
   const startAnalysis = async () => {
     if (!selectedBenchFile || selectedResponseFiles.length === 0) {
-      alert("Пожалуйста, выберите эталонный файл и файлы ответов перед запуском анализа.");
+      notify({
+        type: "warning",
+        title: "Не хватает файлов",
+        message: "Выберите эталонный файл и файлы ответов перед запуском анализа.",
+      });
       return;
     }
 
@@ -322,7 +543,11 @@ function App() {
       setAnalysisTaskId(serverTaskId);
 
       // Show success alert showing that files were successfully sent and accepted
-      alert(data.message || "Файлы успешно отправлены и приняты в обработку!");
+      notify({
+        type: "success",
+        title: "Файлы приняты",
+        message: data.message || "Файлы успешно отправлены и приняты в обработку.",
+      });
 
       let progress = 0;
       let hasCompleted = false;
@@ -386,7 +611,11 @@ function App() {
             clearInterval(intervalRef.current);
             setIsAnalyzing(false);
             await fetchHistory();
-            alert("Анализ провалился на стороне сервера: " + (statusRes.error || "Неизвестная ошибка"));
+            notify({
+              type: "error",
+              title: "Анализ провалился",
+              message: statusRes.error || "Неизвестная ошибка на стороне сервера.",
+            });
           } else {
             // Processing... Continue polling after timeout
             setTimeout(poll, 3000);
@@ -403,14 +632,22 @@ function App() {
 
     } catch (err) {
       setIsAnalyzing(false);
-      alert("Ошибка при отправке файлов: " + err.message);
+      notify({
+        type: "error",
+        title: "Не удалось отправить файлы",
+        message: err.message,
+      });
     }
   };
 
   const handleSaveReportName = async (e) => {
     if (e) e.preventDefault();
     if (!namingValue.trim()) {
-      alert("Пожалуйста, введите название отчета.");
+      notify({
+        type: "warning",
+        title: "Введите название",
+        message: "Название поможет быстро найти отчет в истории.",
+      });
       return;
     }
     setIsSavingName(true);
@@ -418,9 +655,18 @@ function App() {
       await renameAnalysisReport(namingTaskId, namingValue);
       await fetchHistory();
       setShowNamingModal(false);
+      notify({
+        type: "success",
+        title: "Название сохранено",
+        message: "Отчет добавлен в историю анализов.",
+      });
       window.location.hash = `report-detail-${namingTaskId}`;
     } catch (err) {
-      alert("Не удалось сохранить название: " + err.message);
+      notify({
+        type: "error",
+        title: "Не удалось сохранить название",
+        message: err.message,
+      });
     } finally {
       setIsSavingName(false);
     }
@@ -441,8 +687,165 @@ function App() {
       await renameAnalysisReport(reportId, editTitleValue);
       await fetchHistory();
       setIsEditingTitle(false);
+      notify({
+        type: "success",
+        title: "Отчет переименован",
+      });
     } catch (err) {
-      alert("Не удалось переименовать отчет: " + err.message);
+      notify({
+        type: "error",
+        title: "Не удалось переименовать отчет",
+        message: err.message,
+      });
+    }
+  };
+
+  const persistOfflineReport = (reportId, patch) => {
+    setMockReports((reports) =>
+      reports.map((report) => (report.id === reportId ? { ...report, ...patch } : report))
+    );
+    updateOfflineReport(reportId, patch).catch((err) => {
+      notify({
+        type: "error",
+        title: "Не удалось сохранить изменения",
+        message: err.message,
+      });
+    });
+  };
+
+  const handleReportFieldChange = (reportId, field, value) => {
+    persistOfflineReport(reportId, { [field]: value });
+  };
+
+  const handleFindingChange = (report, index, field, value) => {
+    const nextErrors = report.errors.map((error, currentIndex) =>
+      currentIndex === index ? { ...error, [field]: value } : error
+    );
+    persistOfflineReport(report.id, { errors: nextErrors });
+  };
+
+  const addFinding = (report) => {
+    persistOfflineReport(report.id, {
+      errors: [
+        ...report.errors,
+        {
+          priority: "medium",
+          val: "25%",
+          question: "Новый вопрос",
+          text: "Опишите найденную массовую ошибку.",
+        },
+      ],
+    });
+  };
+
+  const removeFinding = (report, index) => {
+    persistOfflineReport(report.id, {
+      errors: report.errors.filter((_, currentIndex) => currentIndex !== index),
+    });
+  };
+
+  const handleRecommendationChange = (report, index, value) => {
+    const nextRecommendations = report.recommendations.map((recommendation, currentIndex) =>
+      currentIndex === index ? value : recommendation
+    );
+    persistOfflineReport(report.id, { recommendations: nextRecommendations });
+  };
+
+  const addRecommendation = (report) => {
+    persistOfflineReport(report.id, {
+      recommendations: [...report.recommendations, "Новая рекомендация для методиста."],
+    });
+  };
+
+  const removeRecommendation = (report, index) => {
+    persistOfflineReport(report.id, {
+      recommendations: report.recommendations.filter((_, currentIndex) => currentIndex !== index),
+    });
+  };
+
+  const handleCreateManualReport = async (e) => {
+    e.preventDefault();
+    try {
+      const report = await createOfflineReport({
+        course: manualCourse.trim() || "Новый локальный курс",
+        title: manualTitle.trim() || "Черновик offline-отчета",
+        errors: [
+          {
+            priority: "medium",
+            val: "30%",
+            question: "Вопрос q_demo",
+            text: "Черновая находка для ручного редактирования в песочнице.",
+          },
+        ],
+        recommendations: ["Уточните содержание отчета в редакторе offline mode."],
+      });
+      await fetchHistory();
+      window.location.hash = `report-detail-${report.id}`;
+      notify({
+        type: "success",
+        title: "Черновик создан",
+        message: "Отчет открыт для просмотра и редактирования.",
+      });
+    } catch (err) {
+      notify({
+        type: "error",
+        title: "Не удалось создать отчет",
+        message: err.message,
+      });
+    }
+  };
+
+  const handleDeleteReport = async (reportId) => {
+    setDeleteTargetId(reportId);
+  };
+
+  const confirmDeleteReport = async () => {
+    if (!deleteTargetId) return;
+    try {
+      await deleteOfflineReport(deleteTargetId);
+      await fetchHistory();
+      setIsEditingReportContent(false);
+      setDeleteTargetId("");
+      window.location.hash = "upload";
+      notify({
+        type: "success",
+        title: "Отчет удален",
+      });
+    } catch (err) {
+      notify({
+        type: "error",
+        title: "Не удалось удалить отчет",
+        message: err.message,
+      });
+    }
+  };
+
+  const handleExportReport = async (report, format) => {
+    setIsSaveMenuOpen(false);
+    try {
+      if (format === "pdf") {
+        await exportReportToPdf(report);
+        notify({ type: "success", title: "PDF сохранен" });
+        return;
+      }
+      if (format === "excel") {
+        await exportReportToXlsx(report);
+        notify({ type: "success", title: "Excel сохранен" });
+        return;
+      }
+      if (format === "csv") {
+        exportReportToCsv(report);
+        notify({ type: "success", title: "CSV сохранен" });
+        return;
+      }
+      exportReportToJson(report);
+      notify({ type: "success", title: "JSON сохранен" });
+    } catch (err) {
+      console.error("Failed to export report:", err);
+      notify({
+        type: "error",
+        title: "Не удалось сохранить файл",
+      });
     }
   };
 
@@ -474,7 +877,7 @@ function App() {
                   style={{ cursor: "pointer" }}
                   onClick={() => benchInputRef.current.click()}
                 >
-                  <span>⇧</span>
+                  <span><Upload size={30} strokeWidth={2.2} /></span>
                   <strong id="bench-file-name">{selectedBenchFile ? selectedBenchFile.name : "Эталонный файл"}</strong>
                   <p>Кликните для выбора benchmark.csv или benchmark.json</p>
                   <input
@@ -493,7 +896,7 @@ function App() {
                   style={{ cursor: "pointer", marginTop: "14px" }}
                   onClick={() => responsesInputRef.current.click()}
                 >
-                  <span>＋</span>
+                  <span><Files size={30} strokeWidth={2.2} /></span>
                   <strong id="responses-file-name">
                     {selectedResponseFiles.length === 0
                       ? "Файлы с ответами"
@@ -552,11 +955,37 @@ function App() {
                 <button
                   className="primary-button wide"
                   id="start-analysis-btn"
-                  style={{ marginTop: "20px", border: 0, width: "100%" }}
+                  style={{ marginTop: "20px", width: "100%" }}
                   onClick={startAnalysis}
                 >
                   Запустить анализ
                 </button>
+
+                {isOfflineMode && (
+                  <form className="offline-create-form" onSubmit={handleCreateManualReport}>
+                    <p className="eyebrow">Offline песочница</p>
+                    <h3>Создать отчет вручную</h3>
+                    <label>
+                      Название курса
+                      <input
+                        type="text"
+                        value={manualCourse}
+                        onChange={(e) => setManualCourse(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Заголовок отчета
+                      <textarea
+                        rows="3"
+                        value={manualTitle}
+                        onChange={(e) => setManualTitle(e.target.value)}
+                      />
+                    </label>
+                    <button type="submit" className="secondary-button wide">
+                      Создать черновик
+                    </button>
+                  </form>
+                )}
               </section>
             </div>
           ) : (
@@ -578,15 +1007,15 @@ function App() {
                 </div>
                 <div id="step-2" className={getTimelineStepClass(1, analysisProgress)}>
                   <b>Данные приведены к JSON</b>
-                  <p>api-core подготовил структуру для ai-driver.</p>
+                  <p>{isOfflineMode ? "Offline mode подготовил локальную структуру отчета." : "api-core подготовил структуру для ai-driver."}</p>
                 </div>
                 <div id="step-3" className={getTimelineStepClass(2, analysisProgress)}>
                   <b>ИИ-агенты анализируют паттерны</b>
-                  <p>Статистик проверяет время, методист ищет типовые ошибки.</p>
+                  <p>{isOfflineMode ? "Создается шаблонный демо-результат для проверки интерфейса." : "Статистик проверяет время, методист ищет типовые ошибки."}</p>
                 </div>
                 <div id="step-4" className={getTimelineStepClass(3, analysisProgress)}>
                   <b>Формируется отчёт</b>
-                  <p>Excel, JSON и PDF будут готовы после завершения.</p>
+                  <p>{isOfflineMode ? "JSON будет доступен локально после завершения." : "Excel, JSON и PDF будут готовы после завершения."}</p>
                 </div>
               </div>
             </div>
@@ -600,12 +1029,15 @@ function App() {
       const report = mockReports.find((r) => r.id === reportId);
 
       if (!report) {
-        return (
-          <section className="page active">
-            <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
-              <h2>Отчёт не найден</h2>
-              <p className="muted">Пожалуйста, выберите существующий отчёт из истории в левой панели.</p>
-            </div>
+      return (
+        <section className="page active">
+          <div className="state-panel">
+            <span className="state-icon state-icon-warm">
+              <XCircle size={28} strokeWidth={2.2} />
+            </span>
+            <h2>Отчёт не найден</h2>
+            <p className="muted">Пожалуйста, выберите существующий отчёт из истории в левой панели.</p>
+          </div>
           </section>
         );
       }
@@ -613,8 +1045,10 @@ function App() {
       if (report.status === "Processing") {
         return (
           <section className="page active" id="report-detail" data-title="Детали отчёта">
-            <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
-              <div style={{ fontSize: "40px", marginBottom: "20px" }}>⏳</div>
+            <div className="state-panel">
+              <span className="state-icon">
+                <Clock3 size={28} strokeWidth={2.2} />
+              </span>
               <h2>Анализ в процессе...</h2>
               <p className="muted">ИИ-агенты в данный момент обрабатывают файлы ответов студентов. Пожалуйста, подождите.</p>
             </div>
@@ -625,10 +1059,12 @@ function App() {
       if (report.status === "Failed") {
         return (
           <section className="page active" id="report-detail" data-title="Детали отчёта">
-            <div className="panel" style={{ textAlign: "center", padding: "60px 20px", borderTop: "4px solid #ef4444" }}>
-              <div style={{ fontSize: "40px", marginBottom: "20px" }}>❌</div>
+            <div className="state-panel state-panel-danger">
+              <span className="state-icon state-icon-danger">
+                <XCircle size={28} strokeWidth={2.2} />
+              </span>
               <h2>Анализ провалился</h2>
-              <p className="muted" style={{ color: "#ef4444", fontWeight: "500", marginTop: "10px" }}>
+              <p className="muted">
                 Ошибка: {report.error || "Неизвестная ошибка на стороне сервера."}
               </p>
             </div>
@@ -641,25 +1077,16 @@ function App() {
           <div className="report-header">
             <div>
               {isEditingTitle ? (
-                <form onSubmit={handleInlineRenameSubmit} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                <form onSubmit={handleInlineRenameSubmit} className="inline-rename-form">
                   <input
                     type="text"
                     value={editTitleValue}
                     onChange={(e) => setEditTitleValue(e.target.value)}
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      backgroundColor: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text)",
-                      fontSize: "14px",
-                      minWidth: "240px",
-                      outline: "none"
-                    }}
+                    className="inline-rename-input"
                     required
                     autoFocus
                   />
-                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px", border: 0 }}>
+                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}>
                     Сохранить
                   </button>
                   <button
@@ -676,419 +1103,364 @@ function App() {
                   <p className="eyebrow" id="report-course-eyebrow" style={{ margin: 0 }}>{report.course}</p>
                   <button
                     type="button"
+                    className="inline-icon-button"
                     onClick={() => {
                       setEditTitleValue(report.course);
                       setIsEditingTitle(true);
                     }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                      padding: 0,
-                      opacity: 0.6,
-                      transition: "opacity 0.2s"
-                    }}
-                    onMouseEnter={(e) => e.target.style.opacity = 1}
-                    onMouseLeave={(e) => e.target.style.opacity = 0.6}
+                    aria-label="Переименовать отчет"
                     title="Переименовать отчет"
                   >
-                    ✏️
+                    <Pencil size={14} strokeWidth={2.2} />
                   </button>
                 </div>
               )}
               <h2 id="report-title-heading">{report.title}</h2>
             </div>
             <div className="export-actions">
-              <button type="button" className="secondary-button">Excel</button>
-              <button type="button" className="secondary-button">JSON</button>
-              <button type="button" className="primary-button">PDF</button>
+              {isOfflineMode && (
+                <>
+                  <button
+                    type="button"
+                    className={`icon-action-button edit-action ${isEditingReportContent ? "active" : ""}`}
+                    onClick={() => setIsEditingReportContent(!isEditingReportContent)}
+                    aria-label={isEditingReportContent ? "Завершить редактирование" : "Редактировать отчет"}
+                    title={isEditingReportContent ? "Готово" : "Редактировать"}
+                  >
+                    <Pencil size={18} strokeWidth={2.2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-action-button delete-action"
+                    onClick={() => handleDeleteReport(report.id)}
+                    aria-label="Удалить"
+                    title="Удалить"
+                  >
+                    <Trash2 size={18} strokeWidth={2.2} />
+                  </button>
+                </>
+              )}
+              <div className="save-actions" ref={saveActionsRef}>
+                <button
+                  type="button"
+                  className="icon-action-button save-action"
+                  onClick={() => {
+                    setIsProfileMenuOpen(false);
+                    setIsSaveMenuOpen((isOpen) => !isOpen);
+                  }}
+                  aria-expanded={isSaveMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Сохранить"
+                  title="Сохранить"
+                >
+                  <Save size={18} strokeWidth={2.2} />
+                </button>
+                {isSaveMenuOpen && (
+                  <div className="save-menu" role="menu">
+                    {["pdf", "excel", "csv", "json"].map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExportReport(report, format)}
+                      >
+                        {format}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="grid two">
-            <section className="panel">
-              <h3>Критичные массовые ошибки</h3>
-              <div id="report-errors-container">
-                {report.errors.map((err, i) => (
-                  <article key={i} className="finding">
-                    <span className={`priority ${err.priority}`}>{err.val}</span>
-                    <div>
-                      <b>{err.question}</b>
-                      <p>{err.text}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+          {isEditingReportContent && isOfflineMode ? (
+            <div className="grid two">
+              <section className="panel report-editor">
+                <h3>Содержание отчета</h3>
+                <label>
+                  Название курса
+                  <input
+                    type="text"
+                    value={report.course}
+                    onChange={(e) => handleReportFieldChange(report.id, "course", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Заголовок отчета
+                  <textarea
+                    rows="4"
+                    value={report.title}
+                    onChange={(e) => handleReportFieldChange(report.id, "title", e.target.value)}
+                  />
+                </label>
+              </section>
 
-            <section className="panel">
-              <h3>Рекомендации</h3>
-              <ul className="recommendations" id="report-recommendations-list">
-                {report.recommendations.map((rec, i) => (
-                  <li key={i}>{rec}</li>
-                ))}
-              </ul>
-            </section>
-          </div>
+              <section className="panel report-editor">
+                <div className="section-heading">
+                  <h3>Рекомендации</h3>
+                  <button type="button" className="secondary-button" onClick={() => addRecommendation(report)}>
+                    Добавить
+                  </button>
+                </div>
+                <div className="editor-list">
+                  {report.recommendations.map((rec, i) => (
+                    <div key={i} className="editor-row">
+                      <textarea
+                        rows="3"
+                        value={rec}
+                        onChange={(e) => handleRecommendationChange(report, i, e.target.value)}
+                      />
+                      <button type="button" className="ghost-button delete-action" onClick={() => removeRecommendation(report, i)}>
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel report-editor editor-wide">
+                <div className="section-heading">
+                  <h3>Критичные массовые ошибки</h3>
+                  <button type="button" className="secondary-button" onClick={() => addFinding(report)}>
+                    Добавить
+                  </button>
+                </div>
+                <div className="editor-list">
+                  {report.errors.map((err, i) => (
+                    <div key={i} className="finding-editor">
+                      <label>
+                        Приоритет
+                        <select
+                          value={err.priority}
+                          onChange={(e) => handleFindingChange(report, i, "priority", e.target.value)}
+                        >
+                          <option value="high">high</option>
+                          <option value="medium">medium</option>
+                          <option value="low">low</option>
+                        </select>
+                      </label>
+                      <label>
+                        Процент
+                        <input
+                          type="text"
+                          value={err.val}
+                          onChange={(e) => handleFindingChange(report, i, "val", e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Вопрос
+                        <input
+                          type="text"
+                          value={err.question}
+                          onChange={(e) => handleFindingChange(report, i, "question", e.target.value)}
+                        />
+                      </label>
+                      <label className="editor-wide">
+                        Описание
+                        <textarea
+                          rows="3"
+                          value={err.text}
+                          onChange={(e) => handleFindingChange(report, i, "text", e.target.value)}
+                        />
+                      </label>
+                      <button type="button" className="ghost-button delete-action" onClick={() => removeFinding(report, i)}>
+                        Удалить ошибку
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="grid two">
+              <section className="panel">
+                <h3>Критичные массовые ошибки</h3>
+                <div id="report-errors-container">
+                  {report.errors.map((err, i) => (
+                    <article key={i} className="finding">
+                      <span className={`priority ${err.priority}`}>{err.val}</span>
+                      <div>
+                        <b>{err.question}</b>
+                        <p>{err.text}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel">
+                <h3>Рекомендации</h3>
+                <ul className="recommendations" id="report-recommendations-list">
+                  {report.recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+          )}
         </section>
       );
     }
 
     if (route === "students") {
       return (
-        <section className="page active" id="students" data-title="Студенты">
-          <div className="panel" style={{ maxWidth: "680px", margin: "40px auto", padding: "30px", borderTop: "4px solid var(--accent-2)" }}>
-            <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
-              <span style={{ fontSize: "36px" }}>🚧</span>
-              <div>
-                <h3 style={{ margin: "0 0 10px 0", fontSize: "20px", color: "var(--text)" }}>Модуль «Студенты» находится в разработке</h3>
-                <p className="muted" style={{ margin: 0, lineHeight: "1.6" }}>
-                  Детальная аналитика по каждому студенту, включая выявление аномального времени прохождения и совпадения текстовых ответов, будет добавлена в ближайших обновлениях системы.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
+        <ComingSoonPage
+          id="students"
+          title="Студенты"
+          message="Здесь будет детальная аналитика по каждому студенту. В этой версии интерфейс оставлен без лишних обещаний и готов к подключению данных."
+        />
       );
     }
 
     if (route === "settings") {
       return (
-        <section className="page active" id="settings" data-title="Настройки">
-          <div className="panel" style={{ maxWidth: "680px", margin: "40px auto", padding: "30px", borderTop: "4px solid var(--accent-2)" }}>
-            <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
-              <span style={{ fontSize: "36px" }}>⚙️</span>
-              <div>
-                <h3 style={{ margin: "0 0 10px 0", fontSize: "20px", color: "var(--text)" }}>Модуль «Настройки» находится в разработке</h3>
-                <p className="muted" style={{ margin: 0, lineHeight: "1.6" }}>
-                  Настройка параметров интеграции с ИИ-моделями (DeepSeek, GigaChat) и лимитов бюджета на запросы будет доступна в следующей версии кабинета методиста.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
+        <SettingsPage
+          settings={userSettings}
+          onSettingsChange={handleSettingsChange}
+          sidebarWidth={layoutPreferences.settingsSidebarWidth}
+          isSidebarCollapsed={layoutPreferences.isSettingsSidebarCollapsed}
+          onSidebarToggle={handleSettingsSidebarToggle}
+          onSidebarResizeStart={(event) => handleSidebarResizeStart("settings", event)}
+        />
       );
     }
 
     if (route === "login") {
       return (
-        <section className="page auth-page active" id="login" data-title="Авторизация">
-          <form className="auth-card" onSubmit={handleLoginSubmit}>
-            <p className="eyebrow">Вход</p>
-            <h2>Добро пожаловать обратно</h2>
-            {authError && <div className="error-box">{authError}</div>}
-            <label>
-              Email
-              <input
-                type="email"
-                placeholder="name@university.ru"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Пароль
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              className="primary-button wide"
-              style={{ border: 0 }}
-            >
-              Войти
-            </button>
-            <a href="#register" onClick={() => setAuthError("")}>Создать аккаунт</a>
-          </form>
-        </section>
+        <AuthPage
+          mode="login"
+          authError={authError}
+          loginEmail={loginEmail}
+          loginPassword={loginPassword}
+          registerUsername={registerUsername}
+          registerEmail={registerEmail}
+          registerPassword={registerPassword}
+          onLoginEmailChange={setLoginEmail}
+          onLoginPasswordChange={setLoginPassword}
+          onRegisterUsernameChange={setRegisterUsername}
+          onRegisterEmailChange={setRegisterEmail}
+          onRegisterPasswordChange={setRegisterPassword}
+          onSubmit={handleLoginSubmit}
+          onClearError={() => setAuthError("")}
+        />
       );
     }
 
     if (route === "register") {
       return (
-        <section className="page auth-page active" id="register" data-title="Регистрация">
-          <form className="auth-card" onSubmit={handleRegisterSubmit}>
-            <p className="eyebrow">Регистрация</p>
-            <h2>Создайте рабочее пространство</h2>
-            {authError && <div className="error-box">{authError}</div>}
-            <label>
-              Имя пользователя
-              <input
-                type="text"
-                placeholder="Ирина"
-                value={registerUsername}
-                onChange={(e) => setRegisterUsername(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                placeholder="name@university.ru"
-                value={registerEmail}
-                onChange={(e) => setRegisterEmail(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Пароль
-              <input
-                type="password"
-                placeholder="Минимум 6 символов"
-                value={registerPassword}
-                onChange={(e) => setRegisterPassword(e.target.value)}
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              className="primary-button wide"
-              style={{ border: 0 }}
-            >
-              Зарегистрироваться
-            </button>
-            <a href="#login" onClick={() => setAuthError("")}>Уже есть аккаунт</a>
-          </form>
-        </section>
+        <AuthPage
+          mode="register"
+          authError={authError}
+          loginEmail={loginEmail}
+          loginPassword={loginPassword}
+          registerUsername={registerUsername}
+          registerEmail={registerEmail}
+          registerPassword={registerPassword}
+          onLoginEmailChange={setLoginEmail}
+          onLoginPasswordChange={setLoginPassword}
+          onRegisterUsernameChange={setRegisterUsername}
+          onRegisterEmailChange={setRegisterEmail}
+          onRegisterPasswordChange={setRegisterPassword}
+          onSubmit={handleRegisterSubmit}
+          onClearError={() => setAuthError("")}
+        />
       );
     }
 
     return (
       <section className="page active">
-        <div className="panel" style={{ textAlign: "center", padding: "60px 20px" }}>
+        <div className="state-panel">
+          <span className="state-icon state-icon-warm">
+            <XCircle size={28} strokeWidth={2.2} />
+          </span>
           <h2>Страница не найдена</h2>
-          <a href="#upload" className="primary-button" style={{ marginTop: "20px" }}>Назад на главную</a>
+          <a href="#upload" className="primary-button state-action">Назад на главную</a>
         </div>
       </section>
     );
   };
 
+  const filteredReports = mockReports.filter((report) => {
+    const query = historyQuery.trim().toLowerCase();
+    if (!query) return true;
+    return `${report.course} ${report.title}`.toLowerCase().includes(query);
+  });
+
+  const deleteTargetReport = mockReports.find((report) => report.id === deleteTargetId);
   const isAuthRoute = route === "login" || route === "register";
 
   if (isAuthRoute) {
     return (
-      <div className="auth-shell">
+      <>
+        <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
+        <div className="auth-shell">
+          {renderActivePage()}
+        </div>
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  if (route === "settings") {
+    return (
+      <>
+        <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
         {renderActivePage()}
-      </div>
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      </>
     );
   }
 
   return (
-    <div className={`app-shell`}>
-      <aside className="sidebar" aria-label="Основная навигация">
-        <a className="brand" href="#upload" aria-label="EduCheck AI">
-          <span className="brand-mark">E</span>
-          <span>
-            <strong>EduCheck AI</strong>
-            <small>анализ ответов</small>
-          </span>
-        </a>
-
-        {/* Новый анализ (аналог "Новый чат") */}
-        <a
-          href="#upload"
-          className={`new-chat-btn ${route === "upload" ? "active" : ""}`}
-          onClick={() => {
-            resetUploadForm();
-            window.location.hash = "upload";
-          }}
-        >
-          <span>＋</span> Новый анализ
-        </a>
-
-        <div className="sidebar-divider"></div>
-
-        <div className="eyebrow" style={{ paddingLeft: "12px", marginBottom: "8px" }}>История анализов</div>
-
-        {/* Список отчетов в боковой панели (как список диалогов в чате) */}
-        <div className="sidebar-history" id="reports-sidebar-list">
-          {mockReports.map((report) => (
-            <a
-              key={report.id}
-              href={`#report-detail-${report.id}`}
-              className={`history-item ${route === `report-detail-${report.id}` ? "active" : ""}`}
-              onClick={(e) => {
-                e.preventDefault();
-                window.location.hash = `report-detail-${report.id}`;
-              }}
-            >
-              <span>📄</span> {report.course}
-            </a>
-          ))}
-        </div>
-
-        <div className="sidebar-divider"></div>
-
-        {/* Дополнительные модули внизу */}
-        <nav className="nav" style={{ marginTop: "auto", display: "grid", gap: "6px" }}>
-          <a
-            href="#students"
-            className={route === "students" ? "active" : ""}
-            style={{ display: "flex", alignItems: "center", gap: "10px" }}
-          >
-            <span>◫</span> Студенты
-          </a>
-          <a
-            href="#settings"
-            className={route === "settings" ? "active" : ""}
-            style={{ display: "flex", alignItems: "center", gap: "10px" }}
-          >
-            <span>⚙</span> Настройки
-          </a>
-        </nav>
-
-        <div className="sidebar-note">
-          <span className="status-dot"></span>
-          <p>
-            {selectedModel === "DeepSeek" && (
-              <>
-                DeepSeek активен<br />
-                <small>GigaChat готов как резерв</small>
-              </>
-            )}
-            {selectedModel === "GigaChat" && (
-              <>
-                GigaChat активен<br />
-                <small>DeepSeek готов как резерв</small>
-              </>
-            )}
-            {selectedModel === "Qwen_Local" && (
-              <>
-                Qwen Local активен<br />
-                <small>Локальная модель</small>
-              </>
-            )}
-          </p>
-        </div>
-      </aside>
-
-      <main className="workspace">
-        <header className="topbar">
-          <button
-            className="menu-button"
-            type="button"
-            aria-label="Открыть меню"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-          >
-            ☰
-          </button>
-          <div>
-            <p className="eyebrow">Кабинет методиста</p>
-            <h1 id="page-title">{getPageTitle(route)}</h1>
-          </div>
-          <div className="top-actions">
-            {token ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                <span style={{ fontSize: "14px", fontWeight: "600", color: "var(--text)" }}>
-                  👤 {user}
-                </span>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={handleLogout}
-                  style={{ minHeight: "36px", padding: "6px 12px" }}
-                >
-                  Выйти
-                </button>
-              </div>
-            ) : (
-              <>
-                <a className="ghost-button" href="#login" onClick={() => setAuthError("")}>Войти</a>
-                <a className="primary-button" href="#register" onClick={() => setAuthError("")}>Регистрация</a>
-              </>
-            )}
-          </div>
-        </header>
-
+    <>
+      <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
+      <AppLayout
+        route={route}
+        pageTitle={getPageTitle(route)}
+        reports={filteredReports}
+        historyQuery={historyQuery}
+        onHistoryQueryChange={setHistoryQuery}
+        onNewAnalysis={() => {
+          resetUploadForm();
+          window.location.hash = "upload";
+        }}
+        token={token}
+        user={user}
+        userEmail={userEmail}
+        isMenuOpen={isMenuOpen}
+        setIsMenuOpen={setIsMenuOpen}
+        isProfileMenuOpen={isProfileMenuOpen}
+        setIsProfileMenuOpen={setIsProfileMenuOpen}
+        setIsSaveMenuOpen={setIsSaveMenuOpen}
+        profileActionsRef={profileActionsRef}
+        onLogout={handleLogout}
+        settings={userSettings}
+        sidebarWidth={layoutPreferences.mainSidebarWidth}
+        isSidebarCollapsed={layoutPreferences.isMainSidebarCollapsed}
+        onSidebarToggle={handleMainSidebarToggle}
+        onSidebarResizeStart={(event) => handleSidebarResizeStart("main", event)}
+      >
         {renderActivePage()}
-      </main>
+      </AppLayout>
 
-      {/* Modal Dialog for saving report name */}
-      {showNamingModal && (
-        <div style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "rgba(0, 0, 0, 0.6)",
-          backdropFilter: "blur(4px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 9999,
-          padding: "16px"
-        }}>
-          <div style={{
-            backgroundColor: "var(--panel-bg)",
-            border: "1px solid var(--border)",
-            borderRadius: "16px",
-            padding: "28px",
-            width: "100%",
-            maxWidth: "480px",
-            boxShadow: "0 20px 40px rgba(0, 0, 0, 0.4)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px"
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "24px" }}>💾</span>
-              <h3 style={{ margin: 0, fontSize: "1.3rem", color: "var(--text)" }}>Назовите ваш анализ</h3>
-            </div>
-            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-              Сохраните этот анализ под понятным именем в вашей истории отчетов, чтобы легко находить его позже.
-            </p>
-            <form onSubmit={handleSaveReportName} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              <input
-                type="text"
-                value={namingValue}
-                onChange={(e) => setNamingValue(e.target.value)}
-                placeholder="Например, Контрольная работа 1"
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  backgroundColor: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  color: "var(--text)",
-                  outline: "none",
-                  fontSize: "14px"
-                }}
-                required
-                autoFocus
-              />
-              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "8px" }}>
-                <button
-                  type="button"
-                  onClick={handleSkipNaming}
-                  disabled={isSavingName}
-                  className="ghost-button"
-                  style={{ minHeight: "40px", padding: "8px 16px" }}
-                >
-                  Пропустить
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingName}
-                  className="primary-button"
-                  style={{ minHeight: "40px", padding: "8px 20px" }}
-                >
-                  {isSavingName ? "Сохранение..." : "Сохранить"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      <NamingDialog
+        open={showNamingModal}
+        value={namingValue}
+        isSaving={isSavingName}
+        onChange={setNamingValue}
+        onSubmit={handleSaveReportName}
+        onSkip={handleSkipNaming}
+      />
+      <ConfirmDialog
+        open={!!deleteTargetId}
+        title="Удалить отчет?"
+        message={`Отчет ${deleteTargetReport ? `«${deleteTargetReport.course}»` : ""} будет удален из локальной истории.`}
+        confirmLabel="Удалить"
+        onConfirm={confirmDeleteReport}
+        onCancel={() => setDeleteTargetId("")}
+      />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </>
   );
 }
 
