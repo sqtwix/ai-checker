@@ -1210,7 +1210,7 @@ function App() {
                         value={rec}
                         onChange={(e) => handleRecommendationChange(report, i, e.target.value)}
                       />
-                      <button type="button" className="ghost-button" onClick={() => removeRecommendation(report, i)}>
+                      <button type="button" className="ghost-button delete-action" onClick={() => removeRecommendation(report, i)}>
                         Удалить
                       </button>
                     </div>
@@ -1263,7 +1263,7 @@ function App() {
                           onChange={(e) => handleFindingChange(report, i, "text", e.target.value)}
                         />
                       </label>
-                      <button type="button" className="ghost-button" onClick={() => removeFinding(report, i)}>
+                      <button type="button" className="ghost-button delete-action" onClick={() => removeFinding(report, i)}>
                         Удалить ошибку
                       </button>
                     </div>

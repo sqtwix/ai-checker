@@ -26,6 +26,12 @@
   --settings-sidebar-width: 220px;
   --radius: 8px;
   --shadow: 0 12px 36px rgba(35, 50, 46, 0.08);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0, 0, 1.2);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
 }
 
@@ -223,6 +229,70 @@
   box-sizing: border-box;
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toolbar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -263,6 +333,7 @@ a {
   align-items: center;
   background: var(--surface-soft);
   color: var(--text);
+  animation: toolbar-in var(--motion-slow) var(--ease-out);
 }
 
 .accessibility-toolbar-inner {
@@ -303,7 +374,7 @@ a {
   font-weight: 800;
   line-height: 1;
   text-decoration: none;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .accessibility-tool-button:hover,
@@ -366,7 +437,7 @@ input {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: var(--app-viewport-height);
-  transition: grid-template-columns 0.16s ease;
+  transition: grid-template-columns var(--motion-base) var(--ease-standard);
 }
 
 .app-shell.sidebar-collapsed {
@@ -384,7 +455,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 26px;
-  transition: padding 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+  transition: padding var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard);
 }
 
 .sidebar-resize-handle {
@@ -411,7 +482,7 @@ input {
   width: 2px;
   border-radius: 999px;
   background: transparent;
-  transition: background 0.16s ease, width 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), width var(--motion-base) var(--ease-standard);
 }
 
 .sidebar-resize-handle:hover::after,
@@ -474,6 +545,7 @@ body.is-resizing-sidebar {
   padding: 10px 12px;
   border-radius: var(--radius);
   color: var(--text);
+  transition: background var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .nav a span {
@@ -537,7 +609,7 @@ p {
   border-radius: var(--radius);
   background: var(--surface);
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .menu-button:hover {
@@ -558,7 +630,7 @@ p {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .primary-button {
@@ -606,6 +678,42 @@ p {
   border-color: var(--danger-hover);
 }
 
+.primary-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.ghost-button:hover:not(:disabled),
+.danger-button:hover:not(:disabled),
+.menu-button:hover,
+.inline-icon-button:hover,
+.icon-action-button:hover,
+.new-chat-btn:hover,
+.nav a:hover,
+.history-item:hover,
+.settings-group-button:hover,
+.theme-options button:hover,
+.save-menu button:hover,
+.profile-menu button:hover,
+.accessibility-tool-button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled),
+.ghost-button:active:not(:disabled),
+.danger-button:active:not(:disabled),
+.menu-button:active,
+.inline-icon-button:active,
+.icon-action-button:active,
+.new-chat-btn:active,
+.nav a:active,
+.history-item:active,
+.settings-group-button:active,
+.theme-options button:active,
+.save-menu button:active,
+.profile-menu button:active,
+.accessibility-tool-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
 .inline-icon-button {
   width: 28px;
   height: 28px;
@@ -619,7 +727,7 @@ p {
   background: var(--surface);
   color: var(--accent);
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .inline-icon-button:hover {
@@ -637,6 +745,7 @@ p {
 
 .page.active {
   display: block;
+  animation: fade-in var(--motion-slow) var(--ease-out);
 }
 
 .hero-panel,
@@ -646,6 +755,7 @@ p {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  animation: surface-in var(--motion-slow) var(--ease-out);
 }
 
 .hero-panel {
@@ -873,6 +983,7 @@ p {
   padding: 28px;
   background: var(--surface-soft);
   text-align: center;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .dropzone span {
@@ -889,6 +1000,13 @@ p {
 .dropzone.compact {
   padding: 22px;
   background: var(--blue);
+}
+
+.dropzone:hover,
+.dropzone:focus-within {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
 }
 
 .field-label {
@@ -915,7 +1033,7 @@ p {
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .segmented button:hover {
@@ -970,7 +1088,7 @@ p {
   display: grid;
   grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
   gap: 18px;
-  transition: grid-template-columns 0.16s ease;
+  transition: grid-template-columns var(--motion-base) var(--ease-standard);
 }
 
 .settings-shell.settings-sidebar-collapsed .settings-screen {
@@ -987,7 +1105,7 @@ p {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
-  transition: padding 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+  transition: padding var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard);
 }
 
 .settings-shell.settings-sidebar-collapsed .settings-side {
@@ -1013,7 +1131,7 @@ p {
   cursor: pointer;
   font-weight: 800;
   text-align: left;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .settings-group-button:hover,
@@ -1080,7 +1198,7 @@ p {
   color: var(--text);
   cursor: pointer;
   font-weight: 700;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .toggle-switch {
@@ -1122,7 +1240,7 @@ p {
   border-radius: 50%;
   background: currentColor;
   transform: translateX(0);
-  transition: transform 0.16s ease;
+  transition: transform var(--motion-base) var(--ease-emphasis);
 }
 
 .toggle-switch.checked .toggle-thumb {
@@ -1162,6 +1280,7 @@ p {
   background: var(--surface);
   box-shadow: var(--shadow);
   text-align: center;
+  animation: surface-in var(--motion-slow) var(--ease-out);
 }
 
 .state-panel-compact {
@@ -1401,6 +1520,7 @@ th {
   padding: 16px;
   background: var(--overlay);
   backdrop-filter: blur(4px);
+  animation: fade-in var(--motion-base) var(--ease-out);
 }
 
 .dialog {
@@ -1412,6 +1532,7 @@ th {
   box-shadow: var(--dialog-shadow);
   display: grid;
   gap: 14px;
+  animation: dialog-in var(--motion-slow) var(--ease-out);
 }
 
 .dialog h3 {
@@ -1460,6 +1581,17 @@ th {
   border-radius: var(--radius);
   background: var(--surface-soft);
   color: var(--text);
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard);
+}
+
+.dialog-form input:focus,
+.offline-create-form input:focus,
+.offline-create-form textarea:focus,
+.report-editor input:focus,
+.report-editor textarea:focus,
+.report-editor select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--mint);
 }
 
 .dialog-actions {
@@ -1481,7 +1613,7 @@ th {
     width: 280px;
     height: var(--app-viewport-height);
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
+    transition: transform var(--motion-base) var(--ease-standard);
   }
 
   .app-shell.sidebar-collapsed .sidebar {
@@ -1658,6 +1790,7 @@ th {
   gap: 8px;
   background: var(--surface-soft);
   color: var(--muted);
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .sidebar-search:focus-within {
@@ -1694,7 +1827,7 @@ th {
   color: var(--text);
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1747,7 +1880,7 @@ th {
   font-weight: 700;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .new-chat-btn:hover {
@@ -1809,7 +1942,7 @@ th {
   background: var(--surface);
   color: var(--accent);
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .icon-action-button:hover,
@@ -1823,8 +1956,9 @@ th {
 }
 
 .delete-action:hover {
-  background: var(--danger-soft);
+  background: var(--danger);
   border-color: var(--danger);
+  color: var(--on-accent);
 }
 
 .save-actions,
@@ -1869,6 +2003,8 @@ th {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: dropdown-in var(--motion-base) var(--ease-out);
 }
 
 .profile-menu {
@@ -1936,6 +2072,7 @@ th {
   font-weight: 700;
   text-align: left;
   text-transform: uppercase;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
 }
 
 .save-menu button:hover {
@@ -2046,6 +2183,7 @@ body[data-density="minimal"] .state-panel {
   background: var(--surface);
   box-shadow: var(--shadow);
   color: var(--text);
+  animation: toast-in var(--motion-slow) var(--ease-out);
 }
 
 .toast-success {
@@ -2124,6 +2262,7 @@ body[data-density="minimal"] .state-panel {
   background: var(--surface-soft);
   color: var(--text);
   resize: vertical;
+  transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard);
 }
 
 :root[data-accessibility="enabled"] input,
@@ -2190,5 +2329,36 @@ body[data-density="minimal"] .state-panel {
   .save-menu {
     right: auto;
     left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .primary-button:hover,
+  .secondary-button:hover,
+  .ghost-button:hover,
+  .danger-button:hover,
+  .menu-button:hover,
+  .inline-icon-button:hover,
+  .icon-action-button:hover,
+  .new-chat-btn:hover,
+  .nav a:hover,
+  .history-item:hover,
+  .settings-group-button:hover,
+  .theme-options button:hover,
+  .save-menu button:hover,
+  .profile-menu button:hover,
+  .accessibility-tool-button:hover,
+  .dropzone:hover,
+  .dropzone:focus-within {
+    transform: none !important;
   }
 }
