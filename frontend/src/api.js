@@ -317,3 +317,16 @@ export async function deleteOfflineReport(reportId) {
   saveOfflineReports(getOfflineReports().filter((report) => report.id !== reportId));
   return null;
 }
+
+export async function getUserSettings() {
+  if (isOfflineMode) return null;
+  return request("/user/settings");
+}
+
+export async function saveUserSettings(settings) {
+  if (isOfflineMode) return null;
+  return request("/user/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}

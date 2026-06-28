@@ -1,6 +1,5 @@
-import { FileText, Menu, Plus, Search, Settings, User, Users } from "lucide-react";
+import { FileText, LogOutIcon, Menu, Plus, Search, Settings, User, Users } from "lucide-react";
 import logo from "../assets/logo.png";
-import { isOfflineMode } from "../api";
 
 export function AppLayout({
   route,
@@ -10,7 +9,6 @@ export function AppLayout({
   historyQuery,
   onHistoryQueryChange,
   onNewAnalysis,
-  selectedModel,
   token,
   user,
   userEmail,
@@ -21,9 +19,14 @@ export function AppLayout({
   setIsSaveMenuOpen,
   profileActionsRef,
   onLogout,
+  settings,
 }) {
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      data-accessibility={settings?.accessibility?.enabled ? "enabled" : "default"}
+      data-density={settings?.minimalUi ? "minimal" : "comfortable"}
+    >
       <aside className="sidebar" aria-label="Основная навигация">
         <a className="brand" href="#upload" aria-label="EduCheck AI">
           <img className="brand-logo" src={logo} alt="EduCheck AI" />
@@ -78,15 +81,10 @@ export function AppLayout({
         <div className="sidebar-divider"></div>
 
         <nav className="nav sidebar-nav">
-          <a href="#students" className={route === "students" ? "active" : ""}>
+          <a href="#students" className={`secondary-nav-link ${route === "students" ? "active" : ""}`}>
             <Users size={17} strokeWidth={2.2} /> Студенты
           </a>
-          <a href="#settings" className={route === "settings" ? "active" : ""}>
-            <Settings size={17} strokeWidth={2.2} /> Настройки
-          </a>
         </nav>
-
-        <ModelStatus selectedModel={selectedModel} />
       </aside>
 
       <main className="workspace">
@@ -128,11 +126,23 @@ export function AppLayout({
                       </span>
                       <span className="profile-summary-text">
                         <strong>{user || "Пользователь"}</strong>
-                        <small>Методист</small>
                         {userEmail && <small>{userEmail}</small>}
                       </span>
                     </div>
-                    <button type="button" role="menuitem" onClick={onLogout}>
+                    <button
+                      type="button"
+                      className="profile-menu-link"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        window.location.hash = "settings";
+                      }}
+                    >
+                      <Settings size={16} strokeWidth={2.2} />
+                      Настройки
+                    </button>
+                    <button type="button" className="profile-menu-danger" role="menuitem" onClick={onLogout}>
+                      <LogOutIcon size={16} strokeWidth={2.2} />
                       Выйти
                     </button>
                   </div>
@@ -149,30 +159,6 @@ export function AppLayout({
 
         {children}
       </main>
-    </div>
-  );
-}
-
-function ModelStatus({ selectedModel }) {
-  const modelText = {
-    DeepSeek: ["DeepSeek активен", "GigaChat готов как резерв"],
-    GigaChat: ["GigaChat активен", "DeepSeek готов как резерв"],
-    Qwen_Local: ["Qwen Local активен", "Локальная модель"],
-  }[selectedModel] || ["Модель активна", "Параметры готовы"];
-
-  return (
-    <div className="sidebar-note">
-      <span className="status-dot"></span>
-      <p>
-        {isOfflineMode && (
-          <>
-            Offline mode<br />
-            <small>Backend не используется</small><br />
-          </>
-        )}
-        {modelText[0]}<br />
-        <small>{modelText[1]}</small>
-      </p>
     </div>
   );
 }

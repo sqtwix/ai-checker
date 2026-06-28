@@ -14,8 +14,10 @@ import {
   deleteOfflineReport,
 } from "./api";
 import { AppLayout } from "./components/Layout";
+import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
 import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
-import { AuthPage, ComingSoonPage } from "./components/Pages";
+import { AuthPage, ComingSoonPage, SettingsPage } from "./components/Pages";
+import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import {
   exportReportToCsv,
   exportReportToJson,
@@ -83,6 +85,8 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [toasts, setToasts] = useState([]);
   const [deleteTargetId, setDeleteTargetId] = useState("");
+  const [userSettings, setUserSettings] = useState(() => readLocalSettings());
+  const [systemThemeTick, setSystemThemeTick] = useState(0);
 
   // Authentication states
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
@@ -129,6 +133,17 @@ function App() {
 
   const dismissToast = (toastId) => {
     setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
+  };
+
+  const handleSettingsChange = async (patch) => {
+    const nextSettings = {
+      ...userSettings,
+      ...patch,
+    };
+    setUserSettings(nextSettings);
+
+    const { settings } = await persistUserSettings(nextSettings);
+    setUserSettings(settings);
   };
 
   const mapReportFromApi = (apiReport) => {
@@ -190,6 +205,59 @@ function App() {
       setMockReports([]);
     }
   }, [token]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const syncSettings = async () => {
+      const { settings } = token
+        ? await loadUserSettings()
+        : { settings: readLocalSettings() };
+
+      if (!ignore) {
+        setUserSettings(settings);
+      }
+    };
+
+    syncSettings();
+
+    return () => {
+      ignore = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const isSystemDark =
+      userSettings.theme === "system" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+    const effectiveTheme = userSettings.theme === "system"
+      ? (isSystemDark ? "dark" : "light")
+      : userSettings.theme;
+
+    root.dataset.theme = effectiveTheme;
+    root.dataset.themePreference = userSettings.theme;
+    const accessibility = userSettings.accessibility || {};
+    root.dataset.accessibility = accessibility.enabled ? "enabled" : "default";
+    root.dataset.fontSize = accessibility.enabled ? (accessibility.fontSize || "xxlarge") : "normal";
+    root.dataset.contrast = accessibility.enabled ? (accessibility.colorScheme || "dark") : "standard";
+    root.dataset.lineSpacing = accessibility.enabled ? "wide" : "normal";
+    root.dataset.letterSpacing = accessibility.enabled ? "wide" : "normal";
+    root.dataset.density = userSettings.minimalUi ? "minimal" : "comfortable";
+    document.body.dataset.density = root.dataset.density;
+  }, [userSettings, systemThemeTick]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mediaQuery) return;
+
+    const handleSystemThemeChange = () => {
+      setSystemThemeTick((tick) => tick + 1);
+    };
+
+    mediaQuery.addEventListener("change", handleSystemThemeChange);
+    return () => mediaQuery.removeEventListener("change", handleSystemThemeChange);
+  }, []);
 
   useEffect(() => {
     const hasProcessing = mockReports.some(r => r.status === "Processing");
@@ -943,21 +1011,12 @@ function App() {
           <div className="report-header">
             <div>
               {isEditingTitle ? (
-                <form onSubmit={handleInlineRenameSubmit} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                <form onSubmit={handleInlineRenameSubmit} className="inline-rename-form">
                   <input
                     type="text"
                     value={editTitleValue}
                     onChange={(e) => setEditTitleValue(e.target.value)}
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      backgroundColor: "var(--bg)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text)",
-                      fontSize: "14px",
-                      minWidth: "240px",
-                      outline: "none"
-                    }}
+                    className="inline-rename-input"
                     required
                     autoFocus
                   />
@@ -1189,10 +1248,9 @@ function App() {
 
     if (route === "settings") {
       return (
-        <ComingSoonPage
-          id="settings"
-          title="Настройки"
-          message="Параметры интеграций и лимитов появятся отдельной итерацией. Сейчас активные настройки модели доступны на экране загрузки."
+        <SettingsPage
+          settings={userSettings}
+          onSettingsChange={handleSettingsChange}
         />
       );
     }
@@ -1263,15 +1321,29 @@ function App() {
 
   if (isAuthRoute) {
     return (
-      <div className="auth-shell">
+      <>
+        <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
+        <div className="auth-shell">
+          {renderActivePage()}
+        </div>
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  if (route === "settings") {
+    return (
+      <>
+        <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
         {renderActivePage()}
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      <AccessibilityToolbar settings={userSettings} onSettingsChange={handleSettingsChange} />
       <AppLayout
         route={route}
         pageTitle={getPageTitle(route)}
@@ -1282,7 +1354,6 @@ function App() {
           resetUploadForm();
           window.location.hash = "upload";
         }}
-        selectedModel={selectedModel}
         token={token}
         user={user}
         userEmail={userEmail}
@@ -1293,6 +1364,7 @@ function App() {
         setIsSaveMenuOpen={setIsSaveMenuOpen}
         profileActionsRef={profileActionsRef}
         onLogout={handleLogout}
+        settings={userSettings}
       >
         {renderActivePage()}
       </AppLayout>
