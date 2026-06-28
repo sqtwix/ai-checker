@@ -1,4 +1,4 @@
-import { FileText, LogOutIcon, Menu, Plus, Search, Settings, User, Users } from "lucide-react";
+import { FileText, LogOutIcon, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, User, Users } from "lucide-react";
 import logo from "../assets/logo.png";
 
 export function AppLayout({
@@ -20,10 +20,15 @@ export function AppLayout({
   profileActionsRef,
   onLogout,
   settings,
+  sidebarWidth,
+  isSidebarCollapsed,
+  onSidebarToggle,
+  onSidebarResizeStart,
 }) {
   return (
     <div
-      className="app-shell"
+      className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}
+      style={{ "--sidebar-width": `${sidebarWidth}px` }}
       data-accessibility={settings?.accessibility?.enabled ? "enabled" : "default"}
       data-density={settings?.minimalUi ? "minimal" : "comfortable"}
     >
@@ -85,6 +90,12 @@ export function AppLayout({
             <Users size={17} strokeWidth={2.2} /> Студенты
           </a>
         </nav>
+        <button
+          type="button"
+          className="sidebar-resize-handle"
+          aria-label="Изменить ширину панели"
+          onPointerDown={onSidebarResizeStart}
+        ></button>
       </aside>
 
       <main className="workspace">
@@ -96,6 +107,19 @@ export function AppLayout({
             onClick={() => setIsMenuOpen(!isMenuOpen)}
           >
             <Menu size={20} strokeWidth={2.2} />
+          </button>
+          <button
+            className="icon-action-button sidebar-toggle-button"
+            type="button"
+            aria-label={isSidebarCollapsed ? "Показать левую панель" : "Скрыть левую панель"}
+            title={isSidebarCollapsed ? "Показать левую панель" : "Скрыть левую панель"}
+            onClick={onSidebarToggle}
+          >
+            {isSidebarCollapsed ? (
+              <PanelLeftOpen size={18} strokeWidth={2.2} />
+            ) : (
+              <PanelLeftClose size={18} strokeWidth={2.2} />
+            )}
           </button>
           <div>
             <p className="eyebrow">Кабинет методиста</p>

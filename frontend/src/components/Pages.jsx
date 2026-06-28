@@ -1,4 +1,4 @@
-import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, Sun } from "lucide-react";
+import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
 
 export function AuthPage({
   mode,
@@ -85,7 +85,14 @@ export function ComingSoonPage({ id, title, message }) {
   );
 }
 
-export function SettingsPage({ settings, onSettingsChange }) {
+export function SettingsPage({
+  settings,
+  onSettingsChange,
+  sidebarWidth,
+  isSidebarCollapsed,
+  onSidebarToggle,
+  onSidebarResizeStart,
+}) {
   const accessibility = settings.accessibility || {};
   const recommendedAccessibility = {
     fontSize: "xxlarge",
@@ -93,18 +100,42 @@ export function SettingsPage({ settings, onSettingsChange }) {
   };
 
   return (
-    <section className="settings-shell" id="settings" data-title="Настройки">
+    <section
+      className={`settings-shell ${isSidebarCollapsed ? "settings-sidebar-collapsed" : ""}`}
+      id="settings"
+      data-title="Настройки"
+      style={{ "--settings-sidebar-width": `${sidebarWidth}px` }}
+    >
       <header className="settings-topbar">
         <a className="ghost-button settings-back" href="#upload">
           <ArrowLeft size={17} strokeWidth={2.2} />
           Назад
         </a>
+        <button
+          type="button"
+          className="icon-action-button settings-sidebar-toggle"
+          aria-label={isSidebarCollapsed ? "Показать панель настроек" : "Скрыть панель настроек"}
+          title={isSidebarCollapsed ? "Показать панель настроек" : "Скрыть панель настроек"}
+          onClick={onSidebarToggle}
+        >
+          {isSidebarCollapsed ? (
+            <PanelLeftOpen size={18} strokeWidth={2.2} />
+          ) : (
+            <PanelLeftClose size={18} strokeWidth={2.2} />
+          )}
+        </button>
       </header>
       <div className="settings-screen">
         <aside className="settings-side" aria-label="Группы настроек">
           <button type="button" className="settings-group-button active">
             Интерфейс
           </button>
+          <button
+            type="button"
+            className="sidebar-resize-handle settings-resize-handle"
+            aria-label="Изменить ширину панели настроек"
+            onPointerDown={onSidebarResizeStart}
+          ></button>
         </aside>
 
         <div className="settings-content">

@@ -18,6 +18,7 @@ import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
 import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
 import { AuthPage, ComingSoonPage, SettingsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
+import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
 import {
   exportReportToCsv,
   exportReportToJson,
@@ -86,6 +87,7 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [deleteTargetId, setDeleteTargetId] = useState("");
   const [userSettings, setUserSettings] = useState(() => readLocalSettings());
+  const [layoutPreferences, setLayoutPreferences] = useState(() => readLayoutPreferences());
   const [systemThemeTick, setSystemThemeTick] = useState(0);
 
   // Authentication states
@@ -118,6 +120,66 @@ function App() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [isEditingReportContent, setIsEditingReportContent] = useState(false);
+
+  const updateLayoutPreferences = (patch) => {
+    setLayoutPreferences((currentPreferences) => ({
+      ...currentPreferences,
+      ...patch,
+    }));
+  };
+
+  const handleMainSidebarToggle = () => {
+    updateLayoutPreferences({
+      isMainSidebarCollapsed: !layoutPreferences.isMainSidebarCollapsed,
+    });
+  };
+
+  const handleSettingsSidebarToggle = () => {
+    updateLayoutPreferences({
+      isSettingsSidebarCollapsed: !layoutPreferences.isSettingsSidebarCollapsed,
+    });
+  };
+
+  const handleSidebarResizeStart = (panel, event) => {
+    if (window.matchMedia?.("(max-width: 980px)")?.matches) return;
+
+    event.preventDefault();
+    const limits = layoutLimits[panel];
+    const panelLeft = event.currentTarget.parentElement?.getBoundingClientRect().left || 0;
+
+    const handlePointerMove = (moveEvent) => {
+      const nextWidth = moveEvent.clientX - panelLeft;
+
+      if (nextWidth < limits.collapseBelow) {
+        updateLayoutPreferences(
+          panel === "main"
+            ? { isMainSidebarCollapsed: true }
+            : { isSettingsSidebarCollapsed: true }
+        );
+        return;
+      }
+
+      const maxWidth = getSidebarMaxWidth(limits);
+      const clampedWidth = Math.min(maxWidth, Math.max(limits.min, nextWidth));
+      updateLayoutPreferences(
+        panel === "main"
+          ? { mainSidebarWidth: clampedWidth, isMainSidebarCollapsed: false }
+          : { settingsSidebarWidth: clampedWidth, isSettingsSidebarCollapsed: false }
+      );
+    };
+
+    const handlePointerUp = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+      document.removeEventListener("pointercancel", handlePointerUp);
+      document.body.classList.remove("is-resizing-sidebar");
+    };
+
+    document.body.classList.add("is-resizing-sidebar");
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp, { once: true });
+    document.addEventListener("pointercancel", handlePointerUp, { once: true });
+  };
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [manualCourse, setManualCourse] = useState("Новый локальный курс");
@@ -225,6 +287,10 @@ function App() {
       ignore = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    writeLayoutPreferences(layoutPreferences);
+  }, [layoutPreferences]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -1251,6 +1317,10 @@ function App() {
         <SettingsPage
           settings={userSettings}
           onSettingsChange={handleSettingsChange}
+          sidebarWidth={layoutPreferences.settingsSidebarWidth}
+          isSidebarCollapsed={layoutPreferences.isSettingsSidebarCollapsed}
+          onSidebarToggle={handleSettingsSidebarToggle}
+          onSidebarResizeStart={(event) => handleSidebarResizeStart("settings", event)}
         />
       );
     }
@@ -1365,6 +1435,10 @@ function App() {
         profileActionsRef={profileActionsRef}
         onLogout={handleLogout}
         settings={userSettings}
+        sidebarWidth={layoutPreferences.mainSidebarWidth}
+        isSidebarCollapsed={layoutPreferences.isMainSidebarCollapsed}
+        onSidebarToggle={handleMainSidebarToggle}
+        onSidebarResizeStart={(event) => handleSidebarResizeStart("main", event)}
       >
         {renderActivePage()}
       </AppLayout>

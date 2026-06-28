@@ -22,6 +22,8 @@
   --dialog-shadow: 0 24px 60px rgba(30, 41, 38, 0.22);
   --accessibility-toolbar-height: 0px;
   --app-viewport-height: 100dvh;
+  --sidebar-width: 280px;
+  --settings-sidebar-width: 220px;
   --radius: 8px;
   --shadow: 0 12px 36px rgba(35, 50, 46, 0.08);
   font-family: Inter, "Segoe UI", Arial, sans-serif;
@@ -362,20 +364,75 @@ input {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: var(--app-viewport-height);
+  transition: grid-template-columns 0.16s ease;
+}
+
+.app-shell.sidebar-collapsed {
+  --sidebar-width: 0px !important;
 }
 
 .sidebar {
   position: sticky;
   top: 0;
   height: var(--app-viewport-height);
+  min-width: 0;
   padding: 24px 18px;
   background: var(--surface);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   gap: 26px;
+  transition: padding 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -7px;
+  z-index: 5;
+  width: 14px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 6px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.16s ease, width 0.16s ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+body.is-resizing-sidebar .sidebar-resize-handle::after {
+  width: 3px;
+  background: var(--accent);
+}
+
+body.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.sidebar-collapsed .sidebar {
+  padding-right: 0;
+  padding-left: 0;
+  border-right: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .brand {
@@ -911,17 +968,35 @@ p {
 .settings-screen {
   min-height: calc(var(--app-viewport-height) - 100px);
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
   gap: 18px;
+  transition: grid-template-columns 0.16s ease;
+}
+
+.settings-shell.settings-sidebar-collapsed .settings-screen {
+  --settings-sidebar-width: 0px !important;
+  gap: 0;
 }
 
 .settings-side {
+  position: relative;
   align-self: stretch;
+  min-width: 0;
   padding: 10px;
   border: 2px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
+  transition: padding 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+}
+
+.settings-shell.settings-sidebar-collapsed .settings-side {
+  padding-right: 0;
+  padding-left: 0;
+  border-color: transparent;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .settings-group-button {
@@ -1409,6 +1484,22 @@ th {
     transition: transform 0.2s ease;
   }
 
+  .app-shell.sidebar-collapsed .sidebar {
+    padding: 24px 18px;
+    border-right: 1px solid var(--line);
+    opacity: 1;
+    overflow: visible;
+    pointer-events: auto;
+  }
+
+  .sidebar-resize-handle {
+    display: none;
+  }
+
+  .sidebar-toggle-button {
+    display: none;
+  }
+
   body.menu-open .sidebar {
     transform: translateX(0);
   }
@@ -1890,7 +1981,7 @@ body[data-density="minimal"] .toast p {
 }
 
 body[data-density="minimal"] .app-shell {
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
 
 body[data-density="minimal"] .sidebar {
