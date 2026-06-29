@@ -1,4 +1,4 @@
-import { Eye, Settings } from "lucide-react";
+﻿import { Eye, Settings } from "lucide-react";
 
 const defaultAccessibility = {
   enabled: false,
