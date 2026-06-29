@@ -8,4 +8,5 @@ public class AnalysisReportDto
     public string Status { get; set; } = string.Empty;
     public CourseBatchAnalysisResult? Result { get; set; }
     public string? Error { get; set; }
+    public bool IsArchived { get; set; }
 }

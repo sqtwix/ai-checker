@@ -143,6 +143,7 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddSingleton<ValidationService>();
 builder.Services.AddScoped<FileParser>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ReportsService>();
 builder.Services.AddHttpClient<AnalysisService>(client =>
 {
     var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
@@ -187,9 +188,10 @@ for (int retry = 0; retry < 5; retry++)
                 CREATE INDEX IF NOT EXISTS ix_analysis_reports_user_id ON analysis_reports (user_id);
             ");
 
-            // Также гарантируем наличие колонки settings_json в таблице users
+            // Также гарантируем наличие колонки settings_json в таблице users и is_archived в analysis_reports
             dbContext.Database.ExecuteSqlRaw(@"
                 ALTER TABLE users ADD COLUMN IF NOT EXISTS settings_json JSONB;
+                ALTER TABLE analysis_reports ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
             ");
         }
         Console.WriteLine(">>>> [УСПЕХ] Успешное подключение к PostgreSQL.");

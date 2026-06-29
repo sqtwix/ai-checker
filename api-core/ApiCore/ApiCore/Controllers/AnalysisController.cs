@@ -19,12 +19,14 @@ public class AnalysisController : ControllerBase
     private readonly AnalysisService _analysisService;
     private readonly AppDbContext _context;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly ReportsService _reportsService;
 
-    public AnalysisController(AnalysisService analysisService, AppDbContext context, IServiceScopeFactory serviceScopeFactory)
+    public AnalysisController(AnalysisService analysisService, AppDbContext context, IServiceScopeFactory serviceScopeFactory, ReportsService reportsService)
     {
         _analysisService = analysisService;
         _context = context;
         _serviceScopeFactory = serviceScopeFactory;
+        _reportsService = reportsService;
     }
 
     [HttpPost("upload")]
@@ -147,7 +149,7 @@ public class AnalysisController : ControllerBase
     }
 
     [HttpGet("history")]
-    public async Task<IActionResult> GetHistory()
+    public async Task<IActionResult> GetHistory([FromQuery] bool includeArchived = false, [FromQuery] bool onlyArchived = false)
     {
         var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
@@ -155,35 +157,8 @@ public class AnalysisController : ControllerBase
             return Unauthorized(new { error = "Пользователь не авторизован." });
         }
 
-        var reports = await _context.AnalysisReports
-            .Where(r => r.UserId == userId)
-            .OrderByDescending(r => r.CreatedAt)
-            .ToListAsync();
-
-        var listDto = new List<AnalysisReportDto>();
-        foreach (var report in reports)
-        {
-            CourseBatchAnalysisResult? result = null;
-            if (!string.IsNullOrEmpty(report.ResultJson))
-            {
-                result = System.Text.Json.JsonSerializer.Deserialize<CourseBatchAnalysisResult>(
-                    report.ResultJson, 
-                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-            }
-
-            listDto.Add(new AnalysisReportDto
-            {
-                Id = report.Id,
-                CourseName = report.CourseName,
-                CreatedAt = report.CreatedAt,
-                Status = report.Status,
-                Result = result,
-                Error = report.Error
-            });
-        }
-
-        return Ok(listDto);
+        var reports = await _reportsService.GetHistoryAsync(userId, includeArchived, onlyArchived);
+        return Ok(reports);
     }
 
     [HttpPut("rename/{taskId}")]
@@ -200,16 +175,49 @@ public class AnalysisController : ControllerBase
             return BadRequest(new { error = "Название не может быть пустым." });
         }
 
-        var report = await _context.AnalysisReports.FirstOrDefaultAsync(r => r.Id == taskId && r.UserId == userId);
-        if (report == null)
+        var success = await _reportsService.RenameReportAsync(taskId, userId, request.Name);
+        if (!success)
         {
             return NotFound(new { error = "Отчет не найден." });
         }
 
-        report.CourseName = request.Name.Trim();
-        await _context.SaveChangesAsync();
+        return Ok(new { message = "Отчет успешно переименован.", courseName = request.Name.Trim() });
+    }
 
-        return Ok(new { message = "Отчет успешно переименован.", courseName = report.CourseName });
+    [HttpPut("archive/{taskId}")]
+    public async Task<IActionResult> ArchiveReport(string taskId)
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        var success = await _reportsService.ArchiveReportAsync(taskId, userId);
+        if (!success)
+        {
+            return NotFound(new { error = "Отчет не найден." });
+        }
+
+        return Ok(new { message = "Отчет успешно архивирован." });
+    }
+
+    [HttpPut("unarchive/{taskId}")]
+    public async Task<IActionResult> UnarchiveReport(string taskId)
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        var success = await _reportsService.UnarchiveReportAsync(taskId, userId);
+        if (!success)
+        {
+            return NotFound(new { error = "Отчет не найден." });
+        }
+
+        return Ok(new { message = "Отчет успешно разархивирован." });
     }
 }
 

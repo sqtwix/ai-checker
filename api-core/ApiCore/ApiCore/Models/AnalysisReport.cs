@@ -31,4 +31,7 @@ public class AnalysisReport
 
     [Column("error")]
     public string? Error { get; set; }
+
+    [Column("is_archived")]
+    public bool IsArchived { get; set; } = false;
 }
