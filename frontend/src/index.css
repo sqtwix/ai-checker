@@ -2364,6 +2364,11 @@ body[data-density="minimal"] .state-panel {
 }
 
 /* Student analytics styles */
+.page {
+  display: grid;
+  gap: 36px;
+}
+
 .students-intro {
   display: flex;
   justify-content: space-between;
@@ -2388,7 +2393,7 @@ body[data-density="minimal"] .state-panel {
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 24px;
 }
 
 .metric-card {
@@ -2464,7 +2469,7 @@ body[data-density="minimal"] .state-panel {
 
 .students-list {
   display: grid;
-  gap: 12px;
+  gap: 20px;
 }
 
 .student-card {
@@ -2472,7 +2477,7 @@ body[data-density="minimal"] .state-panel {
   display: grid;
   grid-template-columns: minmax(150px, .8fr) minmax(150px, .72fr) minmax(280px, 1.55fr) minmax(170px, .7fr);
   gap: 16px;
-  align-items: center;
+  align-items: start;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-soft);
@@ -2486,6 +2491,8 @@ body[data-density="minimal"] .state-panel {
 
 .student-id strong {
   font-size: 16px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .student-id small,
