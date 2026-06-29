@@ -1,10 +1,30 @@
 using ApiCore.Models;
 using System.Text;
+using ExcelDataReader;
 
 namespace ApiCore.Services;
 
 public class FileParser
 {
+    public static List<List<string>> ReadExcelRows(string filePath)
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var rows = new List<List<string>>();
+        using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = ExcelReaderFactory.CreateReader(stream);
+        while (reader.Read())
+        {
+            var row = new List<string>();
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                var val = reader.GetValue(i);
+                row.Add(val?.ToString() ?? "");
+            }
+            rows.Add(row);
+        }
+        return rows;
+    }
+
     public CourseBatchAnalysisRequest ParseToBatchRequest(string benchmarkPath, List<string> userResponsePaths)
     {
         var batchRequest = new CourseBatchAnalysisRequest
@@ -33,6 +53,26 @@ public class FileParser
     private Dictionary<string, string> ParseBenchmarkFile(string filePath)
     {
         var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var ext = Path.GetExtension(filePath).ToLowerSuffix();
+
+        if (ext == ".xlsx" || ext == ".xls")
+        {
+            var rows = ReadExcelRows(filePath);
+            if (rows.Count < 3) return lookup;
+
+            var excelHeaders = rows[0];
+            var excelValues = rows[2];
+
+            for (int i = 0; i < excelHeaders.Count; i++)
+            {
+                if (i < excelValues.Count && !string.IsNullOrWhiteSpace(excelHeaders[i]))
+                {
+                    string questionText = CleanText(excelHeaders[i]);
+                    lookup[questionText] = CleanText(excelValues[i]);
+                }
+            }
+            return lookup;
+        }
 
         using var stream = File.OpenRead(filePath);
         var encoding = GetEncoding(stream);
@@ -66,19 +106,39 @@ public class FileParser
 
     private AiTestPayloadDto? ParseUserResponseFile(string filePath, Dictionary<string, string> referenceAnswersLookup)
     {
-        using var stream = File.OpenRead(filePath);
-        var encoding = GetEncoding(stream);
-        using var reader = new StreamReader(stream, encoding);
+        var ext = Path.GetExtension(filePath).ToLowerSuffix();
+        List<List<string>> rows;
 
-        // Строка 1: Заголовки (Текст вопросов повторяется раз в 4 колонки)
-        string? headerLine = reader.ReadLine();
-        // Строка 2: Субхидеры ("Тип", "Результат", "Полученный ответ", "Правильный ответ")
-        string? subHeaderLine = reader.ReadLine();
+        if (ext == ".xlsx" || ext == ".xls")
+        {
+            rows = ReadExcelRows(filePath);
+        }
+        else
+        {
+            rows = new List<List<string>>();
+            using var stream = File.OpenRead(filePath);
+            var encoding = GetEncoding(stream);
+            using var reader = new StreamReader(stream, encoding);
 
-        if (headerLine == null || subHeaderLine == null) return null;
+            string? line;
+            char delimiter = ',';
+            bool isFirst = true;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (isFirst)
+                {
+                    delimiter = line.Contains(';') ? ';' : ',';
+                    isFirst = false;
+                }
+                rows.Add(ParseCsvLine(line, delimiter));
+            }
+        }
 
-        char delimiter = headerLine.Contains(';') ? ';' : ',';
-        var headers = ParseCsvLine(headerLine, delimiter);
+        if (rows.Count < 2) return null;
+
+        var headers = rows[0];
+        var subHeaders = rows[1];
 
         var testPayload = new AiTestPayloadDto
         {
@@ -118,12 +178,9 @@ public class FileParser
         }
 
         // Шаг Б. Читаем строки с ответами студентов
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        for (int r = 2; r < rows.Count; r++)
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-
-            var fields = ParseCsvLine(line, delimiter);
+            var fields = rows[r];
             if (fields.Count < 4) continue;
 
             // Пропускаем технические или пустые строки, если ID пользователя не числовой

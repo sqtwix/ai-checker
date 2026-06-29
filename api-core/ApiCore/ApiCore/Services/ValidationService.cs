@@ -5,7 +5,7 @@ namespace ApiCore.Services;
 
 public class ValidationService
 {
-    private readonly string[] _allowedExtensions = { ".csv", ".json" };
+    private readonly string[] _allowedExtensions = { ".csv", ".json", ".xlsx", ".xls" };
     private readonly string[] _requiredUserHeaders = { "Пользователь", "Дата", "Статус", "Баллы" };
 
     public ValidationResult ValidateFiles(string benchmarkPath, List<string> userResponsePaths)
@@ -38,13 +38,38 @@ public class ValidationService
         var ext = Path.GetExtension(filePath).ToLowerSuffix();
         if (!_allowedExtensions.Contains(ext))
         {
-            result.AddError($"{fileLabel} имеет недопустимое расширение '{ext}'. Допускаются только: .csv, .json");
+            result.AddError($"{fileLabel} имеет недопустимое расширение '{ext}'. Допускаются только: .csv, .json, .xlsx");
         }
     }
 
     private void ValidateBenchmarkStructure(string filePath, ValidationResult result)
     {
         var fileName = Path.GetFileName(filePath);
+        var ext = Path.GetExtension(filePath).ToLowerSuffix();
+
+        if (ext == ".xlsx" || ext == ".xls")
+        {
+            try
+            {
+                var rows = FileParser.ReadExcelRows(filePath);
+                if (rows.Count < 3)
+                {
+                    result.AddError($"Файл эталона '{fileName}' должен содержать как минимум 3 строки (вопросы, описание, эталонные ответы).");
+                    return;
+                }
+                var headers = rows[0];
+                if (headers.Count < 1 || headers.All(string.IsNullOrWhiteSpace))
+                {
+                    result.AddError($"В файле эталона '{fileName}' не обнаружено колонок с вопросами.");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.AddError($"Не удалось прочитать файл эталона '{fileName}': {ex.Message}");
+            }
+            return;
+        }
+
         try
         {
             using var stream = File.OpenRead(filePath);
@@ -75,6 +100,43 @@ public class ValidationService
     private void ValidateUserResponseStructure(string filePath, ValidationResult result)
     {
         var fileName = Path.GetFileName(filePath);
+        var ext = Path.GetExtension(filePath).ToLowerSuffix();
+
+        if (ext == ".xlsx" || ext == ".xls")
+        {
+            try
+            {
+                var rows = FileParser.ReadExcelRows(filePath);
+                if (rows.Count < 2)
+                {
+                    result.AddError($"Файл ответов '{fileName}' пуст или содержит недостаточно строк.");
+                    return;
+                }
+                var headers = rows[0];
+                var subHeaders = rows[1];
+
+                var combinedHeaders = string.Join(" ", headers.Take(4)) + " " + string.Join(" ", subHeaders.Take(4));
+
+                foreach (var requiredHeader in _requiredUserHeaders)
+                {
+                    if (!combinedHeaders.Contains(requiredHeader))
+                    {
+                        result.AddError($"В файле '{fileName}' отсутствует обязательная колонка '{requiredHeader}'.");
+                    }
+                }
+
+                if (headers.Count < 5)
+                {
+                    result.AddError($"Файл '{fileName}' содержит метаданные, но в нем нет колонок с ответами на вопросы.");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.AddError($"Не удалось прочитать файл ответов '{fileName}': {ex.Message}");
+            }
+            return;
+        }
+
         try
         {
             using var stream = File.OpenRead(filePath);

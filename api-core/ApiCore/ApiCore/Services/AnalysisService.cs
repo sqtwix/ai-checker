@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using System.IO.Compression;
 
 namespace ApiCore.Services;
 /*
@@ -43,6 +44,61 @@ public class AnalysisService
 
         try
         {
+            // 0. Распаковка ZIP архивов, если они присутствуют
+            var expandedPaths = new List<string>();
+            foreach (var path in userResponsePaths)
+            {
+                var ext = Path.GetExtension(path).ToLowerSuffix();
+                if (ext == ".zip")
+                {
+                    _logger.LogInformation($"[Task {taskId}] Обнаружен ZIP-архив: {Path.GetFileName(path)}. Распаковка...");
+                    var zipExtractDir = Path.Combine(tempDir, "extracted_" + Path.GetFileNameWithoutExtension(path));
+                    Directory.CreateDirectory(zipExtractDir);
+                    
+                    try
+                    {
+                        using (var archive = System.IO.Compression.ZipFile.OpenRead(path))
+                        {
+                            foreach (var entry in archive.Entries)
+                            {
+                                if (string.IsNullOrEmpty(entry.Name)) continue;
+                                
+                                // Пропускаем системные/скрытые файлы macOS/Windows
+                                if (entry.FullName.StartsWith("__MACOSX") || entry.Name.StartsWith("._") || entry.Name.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase))
+                                    continue;
+
+                                var nestedExt = Path.GetExtension(entry.Name).ToLowerSuffix();
+                                if (nestedExt == ".xlsx" || nestedExt == ".xls" || nestedExt == ".csv" || nestedExt == ".json")
+                                {
+                                    var destinationPath = Path.Combine(zipExtractDir, entry.Name);
+                                    
+                                    // Обработка конфликтов имен файлов
+                                    int counter = 1;
+                                    while (File.Exists(destinationPath))
+                                    {
+                                        var nameWithoutExt = Path.GetFileNameWithoutExtension(entry.Name);
+                                        destinationPath = Path.Combine(zipExtractDir, $"{nameWithoutExt}_{counter++}{nestedExt}");
+                                    }
+                                    
+                                    entry.ExtractToFile(destinationPath);
+                                    expandedPaths.Add(destinationPath);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"[Task {taskId}] Ошибка распаковки ZIP '{Path.GetFileName(path)}': {ex.Message}");
+                        throw new Exception($"Не удалось обработать ZIP-архив '{Path.GetFileName(path)}': {ex.Message}");
+                    }
+                }
+                else
+                {
+                    expandedPaths.Add(path);
+                }
+            }
+            userResponsePaths = expandedPaths;
+
             // 1. Повторная глубокая валидация в фоне
             var validation = _validationService.ValidateFiles(benchmarkPath, userResponsePaths);
             if (!validation.IsValid)

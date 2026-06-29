@@ -1098,7 +1098,7 @@ function App() {
               <section className="panel">
                 <p className="eyebrow">Новый анализ</p>
                 <h2>Загрузите эталон и ответы студентов</h2>
-                <p className="muted">Поддерживаются CSV и JSON. Если файл пустой или в нём не хватает колонок, система покажет понятную ошибку до запуска ИИ.</p>
+                <p className="muted">Поддерживаются CSV, JSON и XLSX (для ответов также поддерживаются ZIP-архивы). Если файл пустой или в нём не хватает колонок, система покажет понятную ошибку до запуска ИИ.</p>
 
                 <div
                   className="dropzone"
@@ -1108,13 +1108,13 @@ function App() {
                 >
                   <span><Upload size={30} strokeWidth={2.2} /></span>
                   <strong id="bench-file-name">{selectedBenchFile ? selectedBenchFile.name : "Эталонный файл"}</strong>
-                  <p>Кликните для выбора benchmark.csv или benchmark.json</p>
+                  <p>Кликните для выбора benchmark.csv, benchmark.json или benchmark.xlsx</p>
                   <input
                     type="file"
                     id="bench-input"
                     ref={benchInputRef}
                     style={{ display: "none" }}
-                    accept=".csv,.json"
+                    accept=".csv,.json,.xlsx"
                     onChange={(e) => handleFileChange(e, "bench")}
                   />
                 </div>
@@ -1133,14 +1133,14 @@ function App() {
                       ? selectedResponseFiles[0].name
                       : `Выбрано файлов: ${selectedResponseFiles.length}`}
                   </strong>
-                  <p>Кликните для добавления нескольких файлов ответов</p>
+                  <p>Кликните для выбора файлов (.csv, .json, .xlsx) или ZIP-архива</p>
                   <input
                     type="file"
                     id="responses-input"
                     ref={responsesInputRef}
                     style={{ display: "none" }}
                     multiple
-                    accept=".csv,.json"
+                    accept=".csv,.json,.xlsx,.zip"
                     onChange={(e) => handleFileChange(e, "responses")}
                   />
                 </div>
