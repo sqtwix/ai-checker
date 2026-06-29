@@ -2,8 +2,8 @@ const LAYOUT_PREFERENCES_KEY = "educheck_layout_preferences";
 
 export const layoutLimits = {
   main: {
-    min: 220,
-    collapseBelow: 160,
+    min: 240,
+    collapseBelow: 240,
     defaultWidth: 280,
   },
   settings: {

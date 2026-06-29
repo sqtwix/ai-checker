@@ -1356,14 +1356,13 @@ function App() {
                     required
                     autoFocus
                   />
-                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}>
+                  <button type="submit" className="primary-button inline-rename-button">
                     Сохранить
                   </button>
                   <button
                     type="button"
-                    className="ghost-button"
+                    className="ghost-button inline-rename-button"
                     onClick={() => setIsEditingTitle(false)}
-                    style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}
                   >
                     Отмена
                   </button>
