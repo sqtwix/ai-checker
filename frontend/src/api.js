@@ -1,4 +1,4 @@
-export const isOfflineMode =
+﻿export const isOfflineMode =
   String(import.meta.env.VITE_OFFLINE_MODE || "").toLowerCase() === "true";
 
 const OFFLINE_REPORTS_KEY = "educheck_offline_reports";

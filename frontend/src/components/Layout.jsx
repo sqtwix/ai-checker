@@ -1,4 +1,4 @@
-import { FileText, LogOutIcon, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, User, Users } from "lucide-react";
+﻿import { FileText, LogOutIcon, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, User, Users } from "lucide-react";
 import logo from "../assets/logo.png";
 
 export function AppLayout({

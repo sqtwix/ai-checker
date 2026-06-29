@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using ApiCore.Data;
 using ApiCore.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer; // Добавить этот using

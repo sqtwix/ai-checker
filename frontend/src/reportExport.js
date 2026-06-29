@@ -1,4 +1,4 @@
-import verdanaBoldUrl from "./assets/fonts/Verdana-Bold.ttf?url";
+﻿import verdanaBoldUrl from "./assets/fonts/Verdana-Bold.ttf?url";
 import verdanaUrl from "./assets/fonts/Verdana.ttf?url";
 
 const BRAND_GREEN = [47, 111, 101];
