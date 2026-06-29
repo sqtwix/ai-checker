@@ -29,6 +29,9 @@ public class AppDbContext : DbContext
             entity.HasIndex(u => u.Email)
                 .IsUnique()
                 .HasDatabaseName("ix_users_email");
+
+            entity.Property(u => u.SettingsJson)
+                .HasColumnType("jsonb");
         });
 
         // Настраиваем правила для сущности AnalysisReport

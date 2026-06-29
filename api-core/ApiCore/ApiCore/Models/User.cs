@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ApiCore.Models;
@@ -22,4 +22,7 @@ public class User
     [Required]
     [Column("password_hash")]
     public string PasswordHash { get; set; } = string.Empty;
+
+    [Column("settings_json")]
+    public string? SettingsJson { get; set; }
 }
