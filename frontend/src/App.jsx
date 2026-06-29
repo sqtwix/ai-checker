@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useRef } from "react";
-import { Clock3, Files, Pencil, Save, Trash2, Upload, XCircle } from "lucide-react";
+import { Archive, Clock3, Files, Pencil, Save, Upload, XCircle } from "lucide-react";
 import {
   login,
   register,
@@ -11,12 +11,13 @@ import {
   seedOfflineReports,
   createOfflineReport,
   updateOfflineReport,
-  deleteOfflineReport,
+  archiveAnalysisReport,
+  unarchiveAnalysisReport,
 } from "./api";
 import { AppLayout } from "./components/Layout";
 import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
 import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
-import { AuthPage, ComingSoonPage, SettingsPage, StudentsPage } from "./components/Pages";
+import { AuthPage, SettingsPage, StudentsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
 import {
@@ -313,7 +314,8 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const [toasts, setToasts] = useState([]);
-  const [deleteTargetId, setDeleteTargetId] = useState("");
+  const [archiveTargetId, setArchiveTargetId] = useState("");
+  const [archivedReports, setArchivedReports] = useState([]);
   const [userSettings, setUserSettings] = useState(() => readLocalSettings());
   const [layoutPreferences, setLayoutPreferences] = useState(() => readLayoutPreferences());
   const [systemThemeTick, setSystemThemeTick] = useState(0);
@@ -469,6 +471,8 @@ function App() {
       recommendations: mappedRecommendations,
       status: apiReport.status,
       error: apiReport.error,
+      isArchived: Boolean(apiReport.isArchived),
+      createdAt: apiReport.createdAt,
       result: apiReport.result
     };
   };
@@ -485,6 +489,18 @@ function App() {
     }
   };
 
+  const fetchArchivedHistory = async () => {
+    try {
+      const historyData = await getAnalysisHistory({ onlyArchived: true });
+      if (Array.isArray(historyData)) {
+        const mapped = isOfflineMode ? historyData : historyData.map(mapReportFromApi);
+        setArchivedReports(mapped);
+      }
+    } catch (err) {
+      console.error("Failed to fetch archived analysis history:", err);
+    }
+  };
+
   useEffect(() => {
     seedOfflineReports(initialMockReports);
   }, []);
@@ -492,8 +508,10 @@ function App() {
   useEffect(() => {
     if (token) {
       fetchHistory();
+      fetchArchivedHistory();
     } else {
       setMockReports([]);
+      setArchivedReports([]);
     }
   }, [token]);
 
@@ -1024,26 +1042,49 @@ function App() {
     }
   };
 
-  const handleDeleteReport = async (reportId) => {
-    setDeleteTargetId(reportId);
+  const handleArchiveReport = async (reportId) => {
+    setArchiveTargetId(reportId);
   };
 
-  const confirmDeleteReport = async () => {
-    if (!deleteTargetId) return;
+  const confirmArchiveReport = async () => {
+    if (!archiveTargetId) return;
     try {
-      await deleteOfflineReport(deleteTargetId);
+      await archiveAnalysisReport(archiveTargetId);
       await fetchHistory();
+      await fetchArchivedHistory();
       setIsEditingReportContent(false);
-      setDeleteTargetId("");
-      window.location.hash = "upload";
+      const archivedRoute = `report-detail-${archiveTargetId}`;
+      setArchiveTargetId("");
+      if (route === archivedRoute) {
+        window.location.hash = "upload";
+      }
       notify({
         type: "success",
-        title: "Отчет удален",
+        title: "Отчет архивирован",
       });
     } catch (err) {
       notify({
         type: "error",
-        title: "Не удалось удалить отчет",
+        title: "Не удалось архивировать отчет",
+        message: err.message,
+      });
+    }
+  };
+
+  const handleUnarchiveReport = async (reportId) => {
+    try {
+      await unarchiveAnalysisReport(reportId);
+      await fetchHistory();
+      await fetchArchivedHistory();
+      notify({
+        type: "success",
+        title: "Отчет разархивирован",
+        message: "Он снова доступен в основной истории.",
+      });
+    } catch (err) {
+      notify({
+        type: "error",
+        title: "Не удалось разархивировать отчет",
         message: err.message,
       });
     }
@@ -1348,27 +1389,25 @@ function App() {
             </div>
             <div className="export-actions">
               {isOfflineMode && (
-                <>
-                  <button
-                    type="button"
-                    className={`icon-action-button edit-action ${isEditingReportContent ? "active" : ""}`}
-                    onClick={() => setIsEditingReportContent(!isEditingReportContent)}
-                    aria-label={isEditingReportContent ? "Завершить редактирование" : "Редактировать отчет"}
-                    title={isEditingReportContent ? "Готово" : "Редактировать"}
-                  >
-                    <Pencil size={18} strokeWidth={2.2} />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-action-button delete-action"
-                    onClick={() => handleDeleteReport(report.id)}
-                    aria-label="Удалить"
-                    title="Удалить"
-                  >
-                    <Trash2 size={18} strokeWidth={2.2} />
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className={`icon-action-button edit-action ${isEditingReportContent ? "active" : ""}`}
+                  onClick={() => setIsEditingReportContent(!isEditingReportContent)}
+                  aria-label={isEditingReportContent ? "Завершить редактирование" : "Редактировать отчет"}
+                  title={isEditingReportContent ? "Готово" : "Редактировать"}
+                >
+                  <Pencil size={18} strokeWidth={2.2} />
+                </button>
               )}
+              <button
+                type="button"
+                className="icon-action-button archive-action"
+                onClick={() => handleArchiveReport(report.id)}
+                aria-label="Архивировать"
+                title="Архивировать"
+              >
+                <Archive size={18} strokeWidth={2.2} />
+              </button>
               <div className="save-actions" ref={saveActionsRef}>
                 <button
                   type="button"
@@ -1552,6 +1591,8 @@ function App() {
           isSidebarCollapsed={layoutPreferences.isSettingsSidebarCollapsed}
           onSidebarToggle={handleSettingsSidebarToggle}
           onSidebarResizeStart={(event) => handleSidebarResizeStart("settings", event)}
+          archivedReports={archivedReports}
+          onUnarchiveReport={handleUnarchiveReport}
         />
       );
     }
@@ -1617,7 +1658,7 @@ function App() {
     return `${report.course} ${report.title}`.toLowerCase().includes(query);
   });
 
-  const deleteTargetReport = mockReports.find((report) => report.id === deleteTargetId);
+  const archiveTargetReport = mockReports.find((report) => report.id === archiveTargetId);
   const isAuthRoute = route === "login" || route === "register";
 
   if (isAuthRoute) {
@@ -1651,6 +1692,7 @@ function App() {
         reports={filteredReports}
         historyQuery={historyQuery}
         onHistoryQueryChange={setHistoryQuery}
+        onArchiveReport={handleArchiveReport}
         onNewAnalysis={() => {
           resetUploadForm();
           window.location.hash = "upload";
@@ -1683,12 +1725,12 @@ function App() {
         onSkip={handleSkipNaming}
       />
       <ConfirmDialog
-        open={!!deleteTargetId}
-        title="Удалить отчет?"
-        message={`Отчет ${deleteTargetReport ? `«${deleteTargetReport.course}»` : ""} будет удален из локальной истории.`}
-        confirmLabel="Удалить"
-        onConfirm={confirmDeleteReport}
-        onCancel={() => setDeleteTargetId("")}
+        open={!!archiveTargetId}
+        title="Архивировать отчет?"
+        message={`Отчет ${archiveTargetReport ? `«${archiveTargetReport.course}»` : ""} будет перемещен в архив. Его можно вернуть в настройках.`}
+        confirmLabel="Архивировать"
+        onConfirm={confirmArchiveReport}
+        onCancel={() => setArchiveTargetId("")}
       />
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>

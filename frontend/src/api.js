@@ -43,6 +43,7 @@ const normalizeOfflineReport = (report) => ({
   recommendations: Array.isArray(report.recommendations) ? report.recommendations : [],
   status: report.status || "Completed",
   error: report.error || "",
+  isArchived: Boolean(report.isArchived),
   createdAt: report.createdAt || new Date().toISOString(),
   updatedAt: report.updatedAt || new Date().toISOString(),
   result: report.result || null,
@@ -267,13 +268,24 @@ export async function getAnalysisStatus(taskId) {
   return request(`/analysis/status/${taskId}`);
 }
 
-export async function getAnalysisHistory() {
+export async function getAnalysisHistory(options = {}) {
+  const { includeArchived = false, onlyArchived = false } = options;
+
   if (isOfflineMode) {
     await delay(120);
-    return getOfflineReports();
+    return getOfflineReports().filter((report) => {
+      if (onlyArchived) return report.isArchived;
+      if (!includeArchived) return !report.isArchived;
+      return true;
+    });
   }
 
-  return request("/analysis/history");
+  const params = new URLSearchParams();
+  if (includeArchived) params.set("includeArchived", "true");
+  if (onlyArchived) params.set("onlyArchived", "true");
+  const query = params.toString();
+
+  return request(`/analysis/history${query ? `?${query}` : ""}`);
 }
 
 export async function renameAnalysisReport(taskId, newName) {
@@ -323,11 +335,36 @@ export async function updateOfflineReport(reportId, patch) {
   return updatedReport;
 }
 
-export async function deleteOfflineReport(reportId) {
-  if (!isOfflineMode) throw new Error("Удаление локального отчета доступно только в offline mode.");
-  await delay(80);
-  saveOfflineReports(getOfflineReports().filter((report) => report.id !== reportId));
-  return null;
+export async function archiveAnalysisReport(reportId) {
+  if (isOfflineMode) {
+    await delay(80);
+    saveOfflineReports(getOfflineReports().map((report) =>
+      report.id === reportId
+        ? normalizeOfflineReport({ ...report, isArchived: true, updatedAt: new Date().toISOString() })
+        : report
+    ));
+    return null;
+  }
+
+  return request(`/analysis/archive/${reportId}`, {
+    method: "PUT",
+  });
+}
+
+export async function unarchiveAnalysisReport(reportId) {
+  if (isOfflineMode) {
+    await delay(80);
+    saveOfflineReports(getOfflineReports().map((report) =>
+      report.id === reportId
+        ? normalizeOfflineReport({ ...report, isArchived: false, updatedAt: new Date().toISOString() })
+        : report
+    ));
+    return null;
+  }
+
+  return request(`/analysis/unarchive/${reportId}`, {
+    method: "PUT",
+  });
 }
 
 export async function getUserSettings() {

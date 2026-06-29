@@ -687,7 +687,7 @@ p {
 .icon-action-button:hover,
 .new-chat-btn:hover,
 .nav a:hover,
-.history-item:hover,
+.history-row:hover,
 .settings-group-button:hover,
 .theme-options button:hover,
 .save-menu button:hover,
@@ -705,7 +705,7 @@ p {
 .icon-action-button:active,
 .new-chat-btn:active,
 .nav a:active,
-.history-item:active,
+.history-row:active,
 .settings-group-button:active,
 .theme-options button:active,
 .save-menu button:active,
@@ -1195,6 +1195,110 @@ p {
 
 .settings-copy p {
   margin-bottom: 0;
+}
+
+.archive-panel {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.archive-panel .settings-copy {
+  align-items: center;
+}
+
+.archive-panel .settings-copy > svg {
+  margin-top: 0;
+}
+
+.archive-description {
+  margin-bottom: 0;
+}
+
+.archive-search {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  transition:
+    background var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard);
+}
+
+.archive-search:hover,
+.archive-search:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px var(--mint);
+}
+
+.archive-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.archive-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.archive-item {
+  padding: 12px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--surface-soft);
+  min-width: 0;
+}
+
+.archive-item strong,
+.archive-item p {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.archive-item p {
+  margin-top: 4px;
+}
+
+.archive-restore-button {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  color: var(--accent);
+}
+
+.archive-restore-button:hover {
+  background: var(--mint);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.archive-empty {
+  max-width: none;
+  margin: 0;
+  padding: 24px;
 }
 
 .theme-options {
@@ -1733,6 +1837,14 @@ th {
     width: 100%;
   }
 
+  .archive-item {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-restore-button {
+    justify-self: end;
+  }
+
   .workspace {
     padding: 16px;
   }
@@ -1856,20 +1968,32 @@ th {
   line-height: 1.4;
 }
 
-.history-item {
+.history-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   min-height: 38px;
-  padding: 8px 12px;
+  padding: 0 4px 0 0;
   border-radius: var(--radius);
   color: var(--text);
   font-size: 14px;
-  cursor: pointer;
   transition: background var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard), transform var(--motion-fast) var(--ease-out);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.history-item {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--radius);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  cursor: pointer;
   text-decoration: none;
 }
 
@@ -1884,8 +2008,45 @@ th {
   text-overflow: ellipsis;
 }
 
-.history-item:hover, .history-item.active {
+.history-row:hover,
+.history-row:focus-within,
+.history-row.active {
   background: var(--mint);
+  color: var(--accent);
+}
+
+.history-archive-button {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(4px);
+  transition:
+    opacity var(--motion-base) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out),
+    background var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard);
+}
+
+.history-row:hover .history-archive-button,
+.history-row:focus-within .history-archive-button {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.history-archive-button:hover,
+.history-archive-button:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface);
   color: var(--accent);
 }
 
@@ -1998,6 +2159,16 @@ th {
   background: var(--danger);
   border-color: var(--danger);
   color: var(--on-accent);
+}
+
+.archive-action {
+  color: var(--accent);
+}
+
+.archive-action:hover {
+  background: var(--mint);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .save-actions,
@@ -2400,7 +2571,7 @@ body[data-density="minimal"] .state-panel {
   .icon-action-button:hover,
   .new-chat-btn:hover,
   .nav a:hover,
-  .history-item:hover,
+  .history-row:hover,
   .settings-group-button:hover,
   .theme-options button:hover,
   .save-menu button:hover,

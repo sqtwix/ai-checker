@@ -1,4 +1,4 @@
-﻿import { FileText, LogOutIcon, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, User, Users } from "lucide-react";
+﻿import { Archive, FileText, LogOutIcon, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, User, Users } from "lucide-react";
 import logo from "../assets/logo.png";
 
 export function AppLayout({
@@ -8,6 +8,7 @@ export function AppLayout({
   reports,
   historyQuery,
   onHistoryQueryChange,
+  onArchiveReport,
   onNewAnalysis,
   token,
   user,
@@ -62,19 +63,36 @@ export function AppLayout({
         <div className="sidebar-history" id="reports-sidebar-list">
           {reports.length ? (
             reports.map((report) => (
-              <a
+              <div
                 key={report.id}
-                href={`#report-detail-${report.id}`}
-                className={`history-item ${route === `report-detail-${report.id}` ? "active" : ""}`}
-                title={report.title ? `${report.course}: ${report.title}` : report.course}
-                onClick={(e) => {
-                  e.preventDefault();
-                  window.location.hash = `report-detail-${report.id}`;
-                }}
+                className={`history-row ${route === `report-detail-${report.id}` ? "active" : ""}`}
               >
-                <FileText size={16} strokeWidth={2.2} />
-                <span>{report.course}</span>
-              </a>
+                <a
+                  href={`#report-detail-${report.id}`}
+                  className="history-item"
+                  title={report.title ? `${report.course}: ${report.title}` : report.course}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.location.hash = `report-detail-${report.id}`;
+                  }}
+                >
+                  <FileText size={16} strokeWidth={2.2} />
+                  <span>{report.course}</span>
+                </a>
+                <button
+                  type="button"
+                  className="history-archive-button"
+                  aria-label={`Архивировать отчет ${report.course}`}
+                  title="Архивировать"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onArchiveReport?.(report.id);
+                  }}
+                >
+                  <Archive size={15} strokeWidth={2.2} />
+                </button>
+              </div>
             ))
           ) : (
             <div className="sidebar-empty">

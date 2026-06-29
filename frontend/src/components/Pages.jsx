@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo } from "react";
-import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "lucide-react";
 
 export function AuthPage({
   mode,
@@ -93,12 +93,24 @@ export function SettingsPage({
   isSidebarCollapsed,
   onSidebarToggle,
   onSidebarResizeStart,
+  archivedReports = [],
+  onUnarchiveReport,
 }) {
+  const [activeGroup, setActiveGroup] = useState("interface");
+  const [archiveQuery, setArchiveQuery] = useState("");
   const accessibility = settings.accessibility || {};
   const recommendedAccessibility = {
     fontSize: "xxlarge",
     colorScheme: "dark",
   };
+  const filteredArchivedReports = useMemo(() => {
+    const query = archiveQuery.trim().toLowerCase();
+    if (!query) return archivedReports;
+
+    return archivedReports.filter((report) =>
+      `${report.course || ""} ${report.title || ""}`.toLowerCase().includes(query)
+    );
+  }, [archivedReports, archiveQuery]);
 
   return (
     <section
@@ -128,8 +140,19 @@ export function SettingsPage({
       </header>
       <div className="settings-screen">
         <aside className="settings-side" aria-label="Группы настроек">
-          <button type="button" className="settings-group-button active">
+          <button
+            type="button"
+            className={`settings-group-button ${activeGroup === "interface" ? "active" : ""}`}
+            onClick={() => setActiveGroup("interface")}
+          >
             Интерфейс
+          </button>
+          <button
+            type="button"
+            className={`settings-group-button ${activeGroup === "archive" ? "active" : ""}`}
+            onClick={() => setActiveGroup("archive")}
+          >
+            Архив
           </button>
           <button
             type="button"
@@ -140,79 +163,135 @@ export function SettingsPage({
         </aside>
 
         <div className="settings-content">
-          <div className="settings-content-heading">
-            <h2>Интерфейс</h2>
-          </div>
-
-          <section className="panel settings-panel">
-            <div className="settings-copy">
-              <Sun size={20} strokeWidth={2.2} />
-              <div>
-                <h3>Тема</h3>
-                <p className="muted">Выберите светлую, темную или системную тему.</p>
+          {activeGroup === "interface" ? (
+            <>
+              <div className="settings-content-heading">
+                <h2>Интерфейс</h2>
               </div>
-            </div>
-            <div className="theme-options" role="radiogroup" aria-label="Тема интерфейса">
-              {[
-                { value: "system", label: "Системная", icon: Monitor },
-                { value: "light", label: "Светлая", icon: Sun },
-                { value: "dark", label: "Темная", icon: Moon },
-              ].map((option) => {
-                const Icon = option.icon;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={settings.theme === option.value ? "selected" : ""}
-                    role="radio"
-                    aria-checked={settings.theme === option.value}
-                    onClick={() => onSettingsChange({ theme: option.value })}
-                  >
-                    <Icon size={17} strokeWidth={2.2} />
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
 
-          <section className="panel settings-panel">
-            <div className="settings-copy">
-              <Eye size={20} strokeWidth={2.2} />
-              <div>
-                <h3>Режим для слабовидящих</h3>
-                <p className="muted">Включает верхнюю панель для выбора шрифта и контрастной цветовой схемы.</p>
-              </div>
-            </div>
-            <div className="accessibility-panel">
-              <ToggleSwitch
-                checked={accessibility.enabled}
-                ariaLabel="Режим для слабовидящих"
-                onChange={() =>
-                  onSettingsChange({
-                    accessibility: accessibility.enabled
-                      ? { ...accessibility, enabled: false }
-                      : { ...recommendedAccessibility, enabled: true },
-                  })
-                }
-              />
-            </div>
-          </section>
+              <section className="panel settings-panel">
+                <div className="settings-copy">
+                  <Sun size={20} strokeWidth={2.2} />
+                  <div>
+                    <h3>Тема</h3>
+                    <p className="muted">Выберите светлую, темную или системную тему.</p>
+                  </div>
+                </div>
+                <div className="theme-options" role="radiogroup" aria-label="Тема интерфейса">
+                  {[
+                    { value: "system", label: "Системная", icon: Monitor },
+                    { value: "light", label: "Светлая", icon: Sun },
+                    { value: "dark", label: "Темная", icon: Moon },
+                  ].map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={settings.theme === option.value ? "selected" : ""}
+                        role="radio"
+                        aria-checked={settings.theme === option.value}
+                        onClick={() => onSettingsChange({ theme: option.value })}
+                      >
+                        <Icon size={17} strokeWidth={2.2} />
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
 
-          <section className="panel settings-panel">
-            <div className="settings-copy">
-              <Layers3 size={20} strokeWidth={2.2} />
-              <div>
-                <h3>Минимальный интерфейс</h3>
-                <p className="muted">Скрывает вторичные подсказки и декоративные элементы, оставляя рабочие сценарии.</p>
+              <section className="panel settings-panel">
+                <div className="settings-copy">
+                  <Eye size={20} strokeWidth={2.2} />
+                  <div>
+                    <h3>Режим для слабовидящих</h3>
+                    <p className="muted">Включает верхнюю панель для выбора шрифта и контрастной цветовой схемы.</p>
+                  </div>
+                </div>
+                <div className="accessibility-panel">
+                  <ToggleSwitch
+                    checked={accessibility.enabled}
+                    ariaLabel="Режим для слабовидящих"
+                    onChange={() =>
+                      onSettingsChange({
+                        accessibility: accessibility.enabled
+                          ? { ...accessibility, enabled: false }
+                          : { ...recommendedAccessibility, enabled: true },
+                      })
+                    }
+                  />
+                </div>
+              </section>
+
+              <section className="panel settings-panel">
+                <div className="settings-copy">
+                  <Layers3 size={20} strokeWidth={2.2} />
+                  <div>
+                    <h3>Минимальный интерфейс</h3>
+                    <p className="muted">Скрывает вторичные подсказки и декоративные элементы, оставляя рабочие сценарии.</p>
+                  </div>
+                </div>
+                <ToggleSwitch
+                  checked={settings.minimalUi}
+                  ariaLabel="Минимальный интерфейс"
+                  onChange={() => onSettingsChange({ minimalUi: !settings.minimalUi })}
+                />
+              </section>
+            </>
+          ) : (
+            <>
+              <div className="settings-content-heading">
+                <h2>Архив</h2>
               </div>
-            </div>
-            <ToggleSwitch
-              checked={settings.minimalUi}
-              ariaLabel="Минимальный интерфейс"
-              onChange={() => onSettingsChange({ minimalUi: !settings.minimalUi })}
-            />
-          </section>
+
+              <section className="panel archive-panel">
+                <p className="muted archive-description">Здесь хранятся отчеты, скрытые из основной истории.</p>
+
+                <label className="archive-search">
+                  <Search size={18} strokeWidth={2.2} aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={archiveQuery}
+                    onChange={(e) => setArchiveQuery(e.target.value)}
+                    placeholder="Найти архивированный отчет"
+                    aria-label="Найти архивированный отчет"
+                  />
+                </label>
+
+                {filteredArchivedReports.length ? (
+                  <div className="archive-list">
+                    {filteredArchivedReports.map((report) => (
+                      <article className="archive-item" key={report.id}>
+                        <div>
+                          <strong>{report.course}</strong>
+                          <p className="muted">{report.title}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-action-button archive-restore-button"
+                          onClick={() => onUnarchiveReport?.(report.id)}
+                          aria-label={`Разархивировать отчет ${report.course}`}
+                          title="Разархивировать"
+                        >
+                          <ArchiveRestore size={17} strokeWidth={2.2} />
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="state-panel state-panel-compact archive-empty">
+                    <h3>{archiveQuery.trim() ? "Ничего не найдено" : "Архив пуст"}</h3>
+                    <p className="muted">
+                      {archiveQuery.trim()
+                        ? "Попробуйте изменить поисковый запрос."
+                        : "Архивированные отчеты появятся здесь."}
+                    </p>
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </div>
       </div>
     </section>
