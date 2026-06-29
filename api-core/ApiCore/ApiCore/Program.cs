@@ -186,6 +186,11 @@ for (int retry = 0; retry < 5; retry++)
                 );
                 CREATE INDEX IF NOT EXISTS ix_analysis_reports_user_id ON analysis_reports (user_id);
             ");
+
+            // Также гарантируем наличие колонки settings_json в таблице users
+            dbContext.Database.ExecuteSqlRaw(@"
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS settings_json JSONB;
+            ");
         }
         Console.WriteLine(">>>> [УСПЕХ] Успешное подключение к PostgreSQL.");
         break;
