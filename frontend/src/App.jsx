@@ -16,7 +16,7 @@ import {
 import { AppLayout } from "./components/Layout";
 import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
 import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
-import { AuthPage, ComingSoonPage, SettingsPage } from "./components/Pages";
+import { AuthPage, ComingSoonPage, SettingsPage, StudentsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
 import {
@@ -25,6 +25,219 @@ import {
   exportReportToPdf,
   exportReportToXlsx,
 } from "./reportExport";
+
+// Initial Mock Reports Data representing ChatGPT-like dialog history
+function generateMockResult(reportId) {
+  if (reportId === "1") {
+    const student_detailed_analyses = [];
+    const anomalies = [];
+    
+    // Student 20251010006: 14 answers, avg 38, 4 low scores
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20251010006",
+        test_name: "Тест 1",
+        question_id: `q_1_${i+1}`,
+        ai_score_percent: i < 4 ? 30 : 41,
+        uniqueness_status: i === 0 ? "SuspiciousMatch" : "Normal",
+        error_explanation: i === 0 ? "Синтаксис полностью совпадает с работой другого студента." : "Небольшое отклонение от эталонного синтаксиса."
+      });
+    }
+    anomalies.push({
+      student_id: "20251010006",
+      anomaly_type: "SpeedCheating",
+      severity: "High",
+      description: "Аномально быстрое прохождение при высоком проценте совпадений с эталоном. Есть признаки списывания и повторения структуры правильных ответов."
+    });
+
+    // Student 20251010009: 15 answers, avg 70, 2 low scores
+    for (let i = 0; i < 15; i++) {
+      student_detailed_analyses.push({
+        student_id: "20251010009",
+        test_name: "Тест 1",
+        question_id: `q_1_${i+1}`,
+        ai_score_percent: i < 2 ? 40 : 75,
+        uniqueness_status: "Normal",
+        error_explanation: "Несколько ответов отличаются от эталона."
+      });
+    }
+
+    // Student 20250801007: 14 answers, avg 91, 1 low score
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20250801007",
+        test_name: "Тест 1",
+        question_id: `q_1_${i+1}`,
+        ai_score_percent: i === 0 ? 45 : 95,
+        uniqueness_status: "Normal",
+        error_explanation: "Результаты стабильны, аномалий по времени и паттернам ответов нет."
+      });
+    }
+
+    return {
+      global_course_summary: "Выявлены аномалии в промежуточных тестах и синтаксисе",
+      test_summaries: [
+        {
+          test_name: "Тест 1",
+          critical_mass_errors: [
+            { question_id: "q_1_1", fail_rate_percent: 65, error_pattern_description: "Студенты массово выбирают неверный вариант с приставкой. Вероятная причина: путаница между звонкими и глухими согласными.", methodological_reason: "Добавить короткую справку по правописанию приставок." }
+          ]
+        }
+      ],
+      student_detailed_analyses,
+      anomalies,
+      course_recommendations: [
+        { target: "Тест 1", action_item: "Добавить короткую справку по правописанию приставок.", priority: "High" }
+      ]
+    };
+  }
+
+  if (reportId === "2") {
+    const student_detailed_analyses = [];
+    const anomalies = [];
+
+    // Student 20251010006: 14 answers, avg 45, 3 low scores
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20251010006",
+        test_name: "Тест 2",
+        question_id: `q_2_${i+1}`,
+        ai_score_percent: i < 3 ? 35 : 48,
+        uniqueness_status: "Normal",
+        error_explanation: "Ошибки повторяются в заданиях одного типа."
+      });
+    }
+    anomalies.push({
+      student_id: "20251010006",
+      anomaly_type: "ExtremeStruggling",
+      severity: "Medium",
+      description: "Ошибки повторяются в заданиях одного типа."
+    });
+
+    // Student 20251010009: 16 answers, avg 66, 2 low scores
+    for (let i = 0; i < 16; i++) {
+      student_detailed_analyses.push({
+        student_id: "20251010009",
+        test_name: "Тест 2",
+        question_id: `q_2_${i+1}`,
+        ai_score_percent: i < 2 ? 45 : 69,
+        uniqueness_status: "Normal",
+        error_explanation: "Несколько ответов отличаются от эталона. Ошибки повторяются в заданиях одного типа и требуют наблюдения в следующих тестах."
+      });
+    }
+
+    // Student 20250801007: 15 answers, avg 90, 0 low scores
+    for (let i = 0; i < 15; i++) {
+      student_detailed_analyses.push({
+        student_id: "20250801007",
+        test_name: "Тест 2",
+        question_id: `q_2_${i+1}`,
+        ai_score_percent: 90,
+        uniqueness_status: "Normal",
+        error_explanation: "Критичных отклонений не найдено."
+      });
+    }
+
+    return {
+      global_course_summary: "Провалы в теме сложных многотабличных запросов",
+      test_summaries: [
+        {
+          test_name: "Тест 2",
+          critical_mass_errors: [
+            { question_id: "q_3_2", fail_rate_percent: 50, error_pattern_description: "Студенты путают LEFT JOIN и INNER JOIN, выбирая неверные условия фильтрации.", methodological_reason: "Добавить интерактивный тренажер по JOIN." }
+          ]
+        }
+      ],
+      student_detailed_analyses,
+      anomalies,
+      course_recommendations: [
+        { target: "Тест 2", action_item: "Добавить интерактивный тренажер по типам соединений таблиц JOIN.", priority: "Medium" }
+      ]
+    };
+  }
+
+  if (reportId === "3") {
+    const student_detailed_analyses = [];
+    const anomalies = [];
+
+    // Student ab976c98-e4cb: 15 answers, avg 38, 8 low scores
+    for (let i = 0; i < 15; i++) {
+      student_detailed_analyses.push({
+        student_id: "ab976c98-e4cb",
+        test_name: "Тест 3",
+        question_id: `q_3_${i+1}`,
+        ai_score_percent: i < 8 ? 30 : 47,
+        uniqueness_status: "Normal",
+        error_explanation: "Средний AI-балл ниже 50%. Большая часть ответов не совпадает с эталоном, зафиксированы повторяющиеся ошибки по теме."
+      });
+    }
+    anomalies.push({
+      student_id: "ab976c98-e4cb",
+      anomaly_type: "ExtremeStruggling",
+      severity: "High",
+      description: "Средний AI-балл ниже 50%. Большая часть ответов не совпадает с эталоном, зафиксированы повторяющиеся ошибки по теме."
+    });
+
+    // Student 20250801007: 14 answers, avg 92, 0 low scores
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20250801007",
+        test_name: "Тест 3",
+        question_id: `q_3_${i+1}`,
+        ai_score_percent: 92,
+        uniqueness_status: "Normal",
+        error_explanation: "Критичных отклонений не найдено."
+      });
+    }
+
+    return {
+      global_course_summary: "Массовое несоблюдение стандартов доступности интерфейсов",
+      test_summaries: [],
+      student_detailed_analyses,
+      anomalies,
+      course_recommendations: []
+    };
+  }
+
+  if (reportId === "4") {
+    const student_detailed_analyses = [];
+    const anomalies = [];
+
+    // Student 20251010006: 14 answers, avg 55, 0 low scores
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20251010006",
+        test_name: "Тест 4",
+        question_id: `q_4_${i+1}`,
+        ai_score_percent: 55,
+        uniqueness_status: "Normal",
+        error_explanation: "Небольшое отклонение от эталонного синтаксиса."
+      });
+    }
+
+    // Student 20250801007: 14 answers, avg 92, 0 low scores
+    for (let i = 0; i < 14; i++) {
+      student_detailed_analyses.push({
+        student_id: "20250801007",
+        test_name: "Тест 4",
+        question_id: `q_4_${i+1}`,
+        ai_score_percent: 92,
+        uniqueness_status: "Normal",
+        error_explanation: "Критичных отклонений не найдено."
+      });
+    }
+
+    return {
+      global_course_summary: "Анализ базовых алгоритмов и структур данных",
+      test_summaries: [],
+      student_detailed_analyses,
+      anomalies,
+      course_recommendations: []
+    };
+  }
+
+  return null;
+}
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 const initialMockReports = [
@@ -40,7 +253,9 @@ const initialMockReports = [
       "Добавить короткую справку по правописанию приставок.",
       "Перемешать варианты ответов в промежуточном тесте.",
       "Проверить студентов с аномально коротким временем прохождения."
-    ]
+    ],
+    status: "Completed",
+    result: generateMockResult("1")
   },
   {
     id: "2",
@@ -53,7 +268,9 @@ const initialMockReports = [
     recommendations: [
       "Добавить интерактивный тренажер по типам соединений таблиц JOIN.",
       "Включить предупреждающие подсказки в редактор запросов перед выполнением DELETE/UPDATE."
-    ]
+    ],
+    status: "Completed",
+    result: generateMockResult("2")
   },
   {
     id: "3",
@@ -66,7 +283,18 @@ const initialMockReports = [
     recommendations: [
       "Провести вебинар или добавить практикум по стандартам веб-доступности WCAG.",
       "Разнообразить индивидуальные задания на проектирование цветовых схем."
-    ]
+    ],
+    status: "Completed",
+    result: generateMockResult("3")
+  },
+  {
+    id: "4",
+    course: "Введение в программирование",
+    title: "Анализ базовых алгоритмов и структур данных",
+    errors: [],
+    recommendations: [],
+    status: "Completed",
+    result: generateMockResult("4")
   }
 ];
 
@@ -240,7 +468,8 @@ function App() {
       errors: mappedErrors,
       recommendations: mappedRecommendations,
       status: apiReport.status,
-      error: apiReport.error
+      error: apiReport.error,
+      result: apiReport.result
     };
   };
 
@@ -1304,10 +1533,12 @@ function App() {
 
     if (route === "students") {
       return (
-        <ComingSoonPage
-          id="students"
-          title="Студенты"
-          message="Здесь будет детальная аналитика по каждому студенту. В этой версии интерфейс оставлен без лишних обещаний и готов к подключению данных."
+        <StudentsPage
+          reports={mockReports}
+          onNewAnalysis={() => {
+            resetUploadForm();
+            window.location.hash = "upload";
+          }}
         />
       );
     }

@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
 
 export function AuthPage({
@@ -233,5 +234,349 @@ function ToggleSwitch({ checked, label, ariaLabel, onChange }) {
       </span>
       {label && <span>{label}</span>}
     </button>
+  );
+}
+
+function getReportWordForm(count) {
+  const lastDigit = count % 10;
+  const lastTwoDigits = count % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return "отчетов";
+  if (lastDigit === 1) return "отчет";
+  if (lastDigit >= 2 && lastDigit <= 4) return "отчета";
+  return "отчетов";
+}
+
+function getAnswerWordForm(count) {
+  const lastDigit = count % 10;
+  const lastTwoDigits = count % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return "ответов";
+  if (lastDigit === 1) return "ответ";
+  if (lastDigit >= 2 && lastDigit <= 4) return "ответа";
+  return "ответов";
+}
+
+function getAnomalyWordForm(count) {
+  const lastDigit = count % 10;
+  const lastTwoDigits = count % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return "аномалий";
+  if (lastDigit === 1) return "аномалия";
+  if (lastDigit >= 2 && lastDigit <= 4) return "аномалии";
+  return "аномалий";
+}
+
+function getProblemWordForm(count) {
+  const lastDigit = count % 10;
+  const lastTwoDigits = count % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return "проблемных ответов";
+  if (lastDigit === 1) return "проблемный ответ";
+  if (lastDigit >= 2 && lastDigit <= 4) return "проблемных ответа";
+  return "проблемных ответов";
+}
+
+function getRiskPillClass(group) {
+  if (group === "Риск") return "risk";
+  if (group === "Наблюдение") return "watch";
+  return "normal";
+}
+
+export function StudentsPage({ reports, onNewAnalysis }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState("Все");
+
+  const students = useMemo(() => {
+    const studentsMap = {};
+
+    reports.forEach((report) => {
+      if (report.status !== "Completed" || !report.result) return;
+
+      const { student_detailed_analyses = [], anomalies = [] } = report.result;
+
+      // Group anomalies by student_id for this report
+      const reportAnomaliesMap = {};
+      anomalies.forEach((anomaly) => {
+        if (!anomaly.student_id) return;
+        if (!reportAnomaliesMap[anomaly.student_id]) {
+          reportAnomaliesMap[anomaly.student_id] = [];
+        }
+        reportAnomaliesMap[anomaly.student_id].push(anomaly);
+      });
+
+      // Group detailed analyses by student_id for this report
+      const reportAnswersMap = {};
+      student_detailed_analyses.forEach((detail) => {
+        if (!detail.student_id) return;
+        if (!reportAnswersMap[detail.student_id]) {
+          reportAnswersMap[detail.student_id] = [];
+        }
+        reportAnswersMap[detail.student_id].push(detail);
+      });
+
+      // Collect all student IDs in this report
+      const studentIdsInReport = new Set([
+        ...Object.keys(reportAnomaliesMap),
+        ...Object.keys(reportAnswersMap),
+      ]);
+
+      studentIdsInReport.forEach((studentId) => {
+        if (!studentsMap[studentId]) {
+          studentsMap[studentId] = {
+            studentId,
+            reportCount: 0,
+            totalAnswers: 0,
+            scoreSum: 0,
+            scoreCount: 0,
+            lowScoreCount: 0,
+            anomalies: [],
+            detailedAnalyses: [],
+          };
+        }
+
+        const st = studentsMap[studentId];
+        st.reportCount += 1;
+
+        const reportAnswers = reportAnswersMap[studentId] || [];
+        reportAnswers.forEach((ans) => {
+          st.totalAnswers += 1;
+          st.scoreSum += ans.ai_score_percent;
+          st.scoreCount += 1;
+          if (ans.ai_score_percent < 50) {
+            st.lowScoreCount += 1;
+          }
+          st.detailedAnalyses.push(ans);
+        });
+
+        const reportAnomalies = reportAnomaliesMap[studentId] || [];
+        reportAnomalies.forEach((anom) => {
+          st.anomalies.push(anom);
+        });
+      });
+    });
+
+    // Calculate average, risk groups, reasons, and actions
+    return Object.values(studentsMap).map((st) => {
+      const averageScore = st.scoreCount > 0 ? Math.round(st.scoreSum / st.scoreCount) : 0;
+
+      // Find maximum severity
+      let maxSeverity = ""; // "", "Low", "Medium", "High"
+      const severityRank = { "": 0, Low: 1, Medium: 2, High: 3 };
+
+      st.anomalies.forEach((anom) => {
+        const severity = anom.severity || "";
+        if (severityRank[severity] > severityRank[maxSeverity]) {
+          maxSeverity = severity;
+        }
+      });
+
+      // Risk Group logic
+      let riskGroup = "Норма";
+      if (maxSeverity === "High" || averageScore < 50 || st.lowScoreCount > 1) {
+        riskGroup = "Риск";
+      } else if (
+        maxSeverity === "Medium" ||
+        maxSeverity === "Low" ||
+        (averageScore >= 50 && averageScore <= 75) ||
+        st.lowScoreCount > 0
+      ) {
+        riskGroup = "Наблюдение";
+      }
+
+      // Action logic
+      let action = "Без срочных действий";
+      if (riskGroup === "Риск") {
+        action = "Проверить вручную";
+      } else if (riskGroup === "Наблюдение") {
+        action = "Наблюдать динамику";
+      }
+
+      // Reason logic
+      let reason = "Критичных отклонений не найдено.";
+      if (st.anomalies.length > 0) {
+        // Find the anomaly with max severity
+        const sortedAnom = [...st.anomalies].sort((a, b) => {
+          return (severityRank[b.severity || ""] || 0) - (severityRank[a.severity || ""] || 0);
+        });
+        reason = sortedAnom[0].description || "Обнаружена аномалия.";
+      } else if (st.lowScoreCount > 0) {
+        // Find detailed analysis with the lowest score
+        const sortedAnalyses = [...st.detailedAnalyses].sort((a, b) => a.ai_score_percent - b.ai_score_percent);
+        reason = sortedAnalyses[0].error_explanation || "Низкий балл за ответ.";
+      }
+
+      return {
+        studentId: st.studentId,
+        reportCount: st.reportCount,
+        totalAnswers: st.totalAnswers,
+        averageScore,
+        lowScoreCount: st.lowScoreCount,
+        anomalyCount: st.anomalies.length,
+        maxSeverity,
+        riskGroup,
+        reason,
+        action,
+      };
+    });
+  }, [reports]);
+
+  const totalCount = students.length;
+  const riskCount = students.filter((s) => s.riskGroup === "Риск").length;
+  const watchCount = students.filter((s) => s.riskGroup === "Наблюдение").length;
+  const normalCount = students.filter((s) => s.riskGroup === "Норма").length;
+
+  const filteredStudents = useMemo(() => {
+    return students.filter((student) => {
+      // Apply search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        if (!student.studentId.toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+
+      // Apply tab filter
+      if (activeTab !== "Все") {
+        if (student.riskGroup !== activeTab) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [students, searchQuery, activeTab]);
+
+  return (
+    <section className="page active" id="students" data-title="Студенты">
+      {/* Intro panel */}
+      <section className="panel students-intro">
+        <div>
+          <p className="eyebrow">Аналитика по студентам</p>
+          <h2>Группы риска по студентам</h2>
+          <p className="muted">
+            Сводка построена по завершённым анализам из истории. Студенты объединены по идентификатору
+            и распределены по уровню внимания для методиста.
+          </p>
+        </div>
+        <span className="badge">По всей истории</span>
+      </section>
+
+      {/* Conditional Rendering based on state */}
+      {reports.length === 0 ? (
+        <section className="state-panel">
+          <h2>Пока нет данных по студентам</h2>
+          <p className="muted">
+            Пока нет данных по студентам. Запустите анализ, чтобы система собрала студентов из отчётов и распределила их по группам риска.
+          </p>
+          <button className="primary-button" style={{ margin: "4px auto 0" }} onClick={onNewAnalysis}>
+            Новый анализ
+          </button>
+        </section>
+      ) : students.length === 0 ? (
+        <section className="state-panel">
+          <h2>Детализация недоступна</h2>
+          <p className="muted">
+            В завершённых отчётах нет детализации по студентам.
+          </p>
+          <button className="primary-button" style={{ margin: "4px auto 0" }} onClick={onNewAnalysis}>
+            Новый анализ
+          </button>
+        </section>
+      ) : (
+        <>
+          {/* Metrics grid */}
+          <section className="metrics-grid" aria-label="Сводка по группам риска">
+            <article className="metric-card">
+              <span>Всего студентов</span>
+              <strong>{totalCount}</strong>
+              <small>найдено в отчётах</small>
+            </article>
+            <article className="metric-card risk">
+              <span>Риск</span>
+              <strong>{riskCount}</strong>
+              <small>требуют проверки</small>
+            </article>
+            <article className="metric-card watch">
+              <span>Наблюдение</span>
+              <strong>{watchCount}</strong>
+              <small>есть отклонения</small>
+            </article>
+            <article className="metric-card normal">
+              <span>Норма</span>
+              <strong>{normalCount}</strong>
+              <small>без срочных действий</small>
+            </article>
+          </section>
+
+          {/* Search and Filters panel */}
+          <section className="panel controls-panel" aria-label="Поиск и фильтры">
+            <label className="control-search">
+              <span>⌕</span>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Найти student_id"
+              />
+            </label>
+            <div className="segmented" role="tablist" aria-label="Фильтр по группам риска">
+              {["Все", "Риск", "Наблюдение", "Норма"].map((tab) => (
+                <button
+                  key={tab}
+                  className={activeTab === tab ? "selected" : ""}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Students list */}
+          <section className="students-list" aria-label="Список студентов">
+            {filteredStudents.length === 0 ? (
+              <section className="state-panel" style={{ gridColumn: "1 / -1", border: "none", boxShadow: "none" }}>
+                <h2>{searchQuery.trim() ? "Студент не найден" : "В этой группе пока нет студентов"}</h2>
+                <p className="muted">
+                  {searchQuery.trim()
+                    ? "Попробуйте изменить запрос поиска."
+                    : "Студенты с таким уровнем риска отсутствуют в текущих отчетах."}
+                </p>
+              </section>
+            ) : (
+              filteredStudents.map((st) => (
+                <article className="student-card" key={st.studentId}>
+                  <div className="student-id">
+                    <strong>{st.studentId}</strong>
+                    <small>
+                      {st.reportCount} {getReportWordForm(st.reportCount)} · {st.totalAnswers} {getAnswerWordForm(st.totalAnswers)}
+                    </small>
+                    <span className={`risk-pill ${getRiskPillClass(st.riskGroup)}`}>
+                      {st.riskGroup}
+                    </span>
+                  </div>
+                  <div>
+                    <h3>Метрики</h3>
+                    <div className="student-metrics">
+                      <span><b>{st.averageScore}%</b> средний балл</span>
+                      <span><b>{st.anomalyCount}</b> {getAnomalyWordForm(st.anomalyCount)}</span>
+                      <span><b>{st.lowScoreCount}</b> {getProblemWordForm(st.lowScoreCount)}</span>
+                    </div>
+                  </div>
+                  <div className="reason-block">
+                    <h3>Почему попал в группу</h3>
+                    <p className="reason-text" title={st.reason}>
+                      {st.reason}
+                    </p>
+                  </div>
+                  <div className="action-card">
+                    <small>Действие</small>
+                    <strong>{st.action}</strong>
+                  </div>
+                </article>
+              ))
+            )}
+          </section>
+        </>
+      )}
+    </section>
   );
 }

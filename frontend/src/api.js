@@ -45,6 +45,7 @@ const normalizeOfflineReport = (report) => ({
   error: report.error || "",
   createdAt: report.createdAt || new Date().toISOString(),
   updatedAt: report.updatedAt || new Date().toISOString(),
+  result: report.result || null,
 });
 
 const getOfflineReports = () => readJson(OFFLINE_REPORTS_KEY, []).map(normalizeOfflineReport);
@@ -88,6 +89,17 @@ const generateOfflineReport = ({ taskId, benchmarkFile, userResponseFiles, model
       "Проверить группы с одинаковыми паттернами ответов.",
       `Повторить анализ в online mode для реальной проверки моделью ${modelType}.`,
     ],
+    result: {
+      global_course_summary: `Демо-анализ ${userResponseFiles.length} файла(ов) ответов через ${modelType}`,
+      test_summaries: [],
+      student_detailed_analyses: [
+        { student_id: "20251010006", test_name: "Демо", question_id: "q_1", ai_score_percent: 45, uniqueness_status: "Normal", error_explanation: "Демо-ошибка в offline-режиме." },
+        { student_id: "20251010009", test_name: "Демо", question_id: "q_1", ai_score_percent: 65, uniqueness_status: "Normal", error_explanation: "Демо-ошибка в offline-режиме." }
+      ],
+      anomalies: [
+        { student_id: "20251010006", anomaly_type: "SpeedCheating", severity: "High", description: "Демо-аномалия скорости в offline-режиме." }
+      ]
+    }
   });
 };
 
