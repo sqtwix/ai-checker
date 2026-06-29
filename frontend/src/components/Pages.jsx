@@ -1,5 +1,5 @@
-﻿import { useState, useMemo } from "react";
-import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Sun } from "lucide-react";
+import { useState, useMemo } from "react";
+import { ArrowLeft, Construction, Eye, Layers3, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "lucide-react";
 
 export function AuthPage({
   mode,
@@ -445,7 +445,6 @@ export function StudentsPage({ reports, onNewAnalysis }) {
 
   return (
     <section className="page active" id="students" data-title="Студенты">
-      {/* Intro panel */}
       <section className="panel students-intro">
         <div>
           <p className="eyebrow">Аналитика по студентам</p>
@@ -463,9 +462,9 @@ export function StudentsPage({ reports, onNewAnalysis }) {
         <section className="state-panel">
           <h2>Пока нет данных по студентам</h2>
           <p className="muted">
-            Пока нет данных по студентам. Запустите анализ, чтобы система собрала студентов из отчётов и распределила их по группам риска.
+            Запустите анализ, чтобы система собрала студентов из отчётов и распределила их по группам риска.
           </p>
-          <button className="primary-button" style={{ margin: "4px auto 0" }} onClick={onNewAnalysis}>
+          <button className="primary-button state-action" type="button" onClick={onNewAnalysis}>
             Новый анализ
           </button>
         </section>
@@ -475,40 +474,58 @@ export function StudentsPage({ reports, onNewAnalysis }) {
           <p className="muted">
             В завершённых отчётах нет детализации по студентам.
           </p>
-          <button className="primary-button" style={{ margin: "4px auto 0" }} onClick={onNewAnalysis}>
+          <button className="primary-button state-action" type="button" onClick={onNewAnalysis}>
             Новый анализ
           </button>
         </section>
       ) : (
         <>
-          {/* Metrics grid */}
           <section className="metrics-grid" aria-label="Сводка по группам риска">
-            <article className="metric-card">
+            <button
+              type="button"
+              className={`metric-card ${activeTab === "Все" ? "selected" : ""}`}
+              onClick={() => setActiveTab("Все")}
+              aria-pressed={activeTab === "Все"}
+            >
               <span>Всего студентов</span>
               <strong>{totalCount}</strong>
               <small>найдено в отчётах</small>
-            </article>
-            <article className="metric-card risk">
+            </button>
+            <button
+              type="button"
+              className={`metric-card risk ${activeTab === "Риск" ? "selected" : ""}`}
+              onClick={() => setActiveTab("Риск")}
+              aria-pressed={activeTab === "Риск"}
+            >
               <span>Риск</span>
               <strong>{riskCount}</strong>
               <small>требуют проверки</small>
-            </article>
-            <article className="metric-card watch">
+            </button>
+            <button
+              type="button"
+              className={`metric-card watch ${activeTab === "Наблюдение" ? "selected" : ""}`}
+              onClick={() => setActiveTab("Наблюдение")}
+              aria-pressed={activeTab === "Наблюдение"}
+            >
               <span>Наблюдение</span>
               <strong>{watchCount}</strong>
               <small>есть отклонения</small>
-            </article>
-            <article className="metric-card normal">
+            </button>
+            <button
+              type="button"
+              className={`metric-card normal ${activeTab === "Норма" ? "selected" : ""}`}
+              onClick={() => setActiveTab("Норма")}
+              aria-pressed={activeTab === "Норма"}
+            >
               <span>Норма</span>
               <strong>{normalCount}</strong>
               <small>без срочных действий</small>
-            </article>
+            </button>
           </section>
 
-          {/* Search and Filters panel */}
-          <section className="panel controls-panel" aria-label="Поиск и фильтры">
+          <section className="panel controls-panel" aria-label="Поиск студентов">
             <label className="control-search">
-              <span>⌕</span>
+              <Search size={18} strokeWidth={2.2} aria-hidden="true" />
               <input
                 type="search"
                 value={searchQuery}
@@ -516,24 +533,11 @@ export function StudentsPage({ reports, onNewAnalysis }) {
                 placeholder="Найти student_id"
               />
             </label>
-            <div className="segmented" role="tablist" aria-label="Фильтр по группам риска">
-              {["Все", "Риск", "Наблюдение", "Норма"].map((tab) => (
-                <button
-                  key={tab}
-                  className={activeTab === tab ? "selected" : ""}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
           </section>
 
-          {/* Students list */}
           <section className="students-list" aria-label="Список студентов">
             {filteredStudents.length === 0 ? (
-              <section className="state-panel" style={{ gridColumn: "1 / -1", border: "none", boxShadow: "none" }}>
+              <section className="state-panel students-empty">
                 <h2>{searchQuery.trim() ? "Студент не найден" : "В этой группе пока нет студентов"}</h2>
                 <p className="muted">
                   {searchQuery.trim()

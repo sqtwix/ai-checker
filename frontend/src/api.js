@@ -3,6 +3,7 @@
 
 const OFFLINE_REPORTS_KEY = "educheck_offline_reports";
 const OFFLINE_TASKS_KEY = "educheck_offline_tasks";
+const OFFLINE_STUDENTS_DEMO_SEED_KEY = "educheck_offline_students_demo_seed_v1";
 
 const getApiBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) {
@@ -124,8 +125,36 @@ const reportToApiResult = (report) => ({
 });
 
 export function seedOfflineReports(reports) {
-  if (!isOfflineMode || localStorage.getItem(OFFLINE_REPORTS_KEY)) return;
-  saveOfflineReports(reports);
+  if (!isOfflineMode) return;
+
+  const demoReports = reports.map(normalizeOfflineReport);
+  const currentReports = getOfflineReports();
+
+  if (currentReports.length === 0) {
+    saveOfflineReports(demoReports);
+    localStorage.setItem(OFFLINE_STUDENTS_DEMO_SEED_KEY, "true");
+    return;
+  }
+
+  if (localStorage.getItem(OFFLINE_STUDENTS_DEMO_SEED_KEY)) return;
+
+  const demoReportsById = new Map(demoReports.map((report) => [report.id, report]));
+  const mergedReports = currentReports.map((report) => {
+    const demoReport = demoReportsById.get(report.id);
+    if (!demoReport) return report;
+
+    const hasStudentDetails =
+      Array.isArray(report.result?.student_detailed_analyses) &&
+      report.result.student_detailed_analyses.length > 0;
+
+    return hasStudentDetails ? report : demoReport;
+  });
+
+  const currentIds = new Set(mergedReports.map((report) => report.id));
+  const missingDemoReports = demoReports.filter((report) => !currentIds.has(report.id));
+
+  saveOfflineReports([...missingDemoReports, ...mergedReports]);
+  localStorage.setItem(OFFLINE_STUDENTS_DEMO_SEED_KEY, "true");
 }
 
 export async function request(endpoint, options = {}) {

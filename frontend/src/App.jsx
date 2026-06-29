@@ -16,7 +16,7 @@ import {
 import { AppLayout } from "./components/Layout";
 import { AccessibilityToolbar } from "./components/AccessibilityToolbar";
 import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
-import { AuthPage, ComingSoonPage, SettingsPage, StudentsPage } from "./components/Pages";
+import { AuthPage, SettingsPage, StudentsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
 import {
@@ -1315,14 +1315,13 @@ function App() {
                     required
                     autoFocus
                   />
-                  <button type="submit" className="primary-button" style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}>
+                  <button type="submit" className="primary-button inline-rename-button">
                     Сохранить
                   </button>
                   <button
                     type="button"
-                    className="ghost-button"
+                    className="ghost-button inline-rename-button"
                     onClick={() => setIsEditingTitle(false)}
-                    style={{ padding: "4px 10px", minHeight: "28px", fontSize: "12px" }}
                   >
                     Отмена
                   </button>
