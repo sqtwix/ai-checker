@@ -1,5 +1,5 @@
 ﻿from backend.agent_manager import AgentManager
-from schemas.analysis_response import AnalysisResponse
+from schemas.analysis_response import AnalysisResponse, StudentDetailedAnalysis
 from schemas.analysis_request import AnalysisRequest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -21,6 +21,7 @@ class AgentController:
             )
             # Валидация ответа нейросети через Pydantic
             validated_response = AnalysisResponse.model_validate_json(ai_responses)
+            validated_response = self._enrich_and_complete_response(validated_response, input_data)
             return JSONResponse(
                 status_code=200,
                 content=validated_response.model_dump()
@@ -42,6 +43,7 @@ class AgentController:
             )
             # Валидация ответа нейросети через Pydantic
             validated_response = AnalysisResponse.model_validate_json(ai_responses)
+            validated_response = self._enrich_and_complete_response(validated_response, input_data)
             return JSONResponse(
                 status_code=200,
                 content=validated_response.model_dump()
@@ -63,6 +65,7 @@ class AgentController:
             )
             # Валидация ответа нейросети через Pydantic
             validated_response = AnalysisResponse.model_validate_json(ai_responses)
+            validated_response = self._enrich_and_complete_response(validated_response, input_data)
             return JSONResponse(
                 status_code=200,
                 content=validated_response.model_dump()
@@ -74,6 +77,54 @@ class AgentController:
                 status_code=200,
                 content=fallback_data
             )
+
+    def _enrich_and_complete_response(self, response: AnalysisResponse, input_data: AnalysisRequest) -> AnalysisResponse:
+        """
+        Гарантирует, что каждый ответ каждого студента присутствует в student_detailed_analyses.
+        Если ИИ-агент пропустил какой-то ответ (например, потому что он верный),
+        мы программно добавляем его с дефолтными значениями, чтобы статистика в таблицах была точной.
+        """
+        existing = {
+            (detail.student_id, detail.test_name, detail.question_id)
+            for detail in response.student_detailed_analyses
+        }
+
+        for test in input_data.tests:
+            for attempt in test.student_attempts:
+                for answer in attempt.answers:
+                    key = (attempt.student_id, test.test_name, answer.question_id)
+                    if key not in existing:
+                        is_correct = answer.is_correct_by_lms
+                        ai_score = 100.0 if is_correct else 0.0
+                        
+                        # Сопоставление с эталоном
+                        ref_ans = ""
+                        for q in test.questions:
+                            if q.question_id == answer.question_id:
+                                ref_ans = q.reference_answer
+                                break
+                        
+                        clean_ref = str(ref_ans).strip().lower()
+                        clean_user = str(answer.user_answer).strip().lower()
+                        if clean_user == clean_ref:
+                            ai_score = 100.0
+                        elif clean_ref and clean_user and (clean_ref in clean_user or clean_user in clean_ref):
+                            ai_score = max(ai_score, 50.0)
+
+                        explanation = "Ответ верный. Ошибок не обнаружено." if ai_score >= 100.0 else "Ответ отличается от эталона. Зафиксирована ошибка."
+                        
+                        response.student_detailed_analyses.append(
+                            StudentDetailedAnalysis(
+                                student_id=attempt.student_id,
+                                test_name=test.test_name,
+                                question_id=answer.question_id,
+                                ai_score_percent=ai_score,
+                                uniqueness_status="Normal",
+                                error_explanation=explanation
+                            )
+                        )
+                        existing.add(key)
+        return response
 
     def _validate_request(self, input_data: AnalysisRequest):
         # Валидирует входные данные на соответствие бизнес-правилам.
