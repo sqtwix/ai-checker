@@ -57,12 +57,13 @@ curl -LO https://huggingface.co/mozilla-ai/llamafile_0.10/resolve/main/Qwen3.5-0
 chmod +x Qwen3.5-0.8B-Q8_0.llamafile
 ```
 2. Поместите файл в папку `models/` в корне проекта.
-3. В файле `docker-compose.yml` в секции сервиса `qwen-local` обновите переменную окружения `MODEL_PATH`:
+3. Создайте переменные среды: скопируйте содержимое __env_example.txt__ (там уже есть перемнные для JWT) и создайте __.env файл__, добавив значения перемнных БД.
+4. В файле `docker-compose.yml` в секции сервиса `qwen-local` обновите переменную окружения `MODEL_PATH`:
    ```yaml
    environment:
      - MODEL_PATH=/models/ИМЯ_ВАШЕГО_ФАЙЛА.gguf
    ```
-4. Перезапустите контейнер: `docker compose up -d qwen-local`
+5. Перезапустите контейнер: `docker compose up -d qwen-local`
 
 ### Настройка производительности на CPU:
 В `docker-compose.yml` для сервиса `qwen-local` можно настроить следующие переменные:
