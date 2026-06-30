@@ -34,10 +34,10 @@ export function AppLayout({
       data-density={settings?.minimalUi ? "minimal" : "comfortable"}
     >
       <aside className="sidebar" aria-label="Основная навигация">
-        <a className="brand" href="#upload" aria-label="EduCheck AI">
-          <img className="brand-logo" src={logo} alt="EduCheck AI" />
+        <a className="brand" href="#upload" aria-label="НейроЭксперт">
+          <img className="brand-logo" src={logo} alt="НейроЭксперт" />
           <span>
-            <strong>EduCheck AI</strong>
+            <strong>НейроЭксперт</strong>
             <small>анализ ответов</small>
           </span>
         </a>

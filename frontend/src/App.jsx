@@ -628,7 +628,7 @@ function App() {
 
   // Update document title dynamically
   useEffect(() => {
-    document.title = "EduCheck AI — личный кабинет";
+    document.title = "НейроЭксперт — личный кабинет";
   }, []);
 
   useEffect(() => {
@@ -735,7 +735,7 @@ function App() {
     if (currentRoute === "settings") return "Настройки";
     if (currentRoute === "login") return "Авторизация";
     if (currentRoute === "register") return "Регистрация";
-    return "EduCheck AI";
+    return "НейроЭксперт";
   };
 
   const handleFileChange = (e, type) => {

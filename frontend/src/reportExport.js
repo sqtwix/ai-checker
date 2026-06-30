@@ -13,12 +13,12 @@ const formatExportDate = () =>
   }).format(new Date());
 
 const safeFileName = (value, extension) => {
-  const baseName = (value || "educheck-report")
+  const baseName = (value || "neuroexpert-report")
     .trim()
     .replace(/[\\/:*?"<>|]+/g, "_")
     .replace(/\s+/g, "_")
     .slice(0, 80);
-  return `${baseName || "educheck-report"}.${extension}`;
+  return `${baseName || "neuroexpert-report"}.${extension}`;
 };
 
 const normalizeRows = (report) => ({
@@ -69,7 +69,7 @@ export async function exportReportToPdf(report) {
   doc.setTextColor(...BRAND_GREEN);
   doc.setFont(PDF_FONT, "bold");
   doc.setFontSize(18);
-  doc.text("EduCheck AI", 14, 15);
+  doc.text("НейроЭксперт", 14, 15);
 
   doc.setTextColor(...TEXT_COLOR);
   doc.setFontSize(11);
@@ -189,7 +189,7 @@ export async function exportReportToXlsx(report) {
   const { errors, recommendations } = normalizeRows(report);
   const exportDate = formatExportDate();
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "EduCheck AI";
+  workbook.creator = "НейроЭксперт";
   workbook.created = new Date();
 
   const summarySheet = workbook.addWorksheet("Summary");
@@ -198,7 +198,7 @@ export async function exportReportToXlsx(report) {
     { header: "Значение", key: "value", width: 70 },
   ];
   summarySheet.addRows([
-    { field: "Сервис", value: "EduCheck AI" },
+    { field: "Сервис", value: "НейроЭксперт" },
     { field: "Курс", value: report.course || "Электронный курс" },
     { field: "Заголовок отчета", value: report.title || "Отчет без названия" },
     { field: "Статус", value: report.status || "Completed" },
@@ -259,7 +259,7 @@ export function exportReportToCsv(report) {
   const rows = [
     ["Summary"],
     ["Field", "Value"],
-    ["Service", "EduCheck AI"],
+    ["Service", "НейроЭксперт"],
     ["Course", report.course || "Электронный курс"],
     ["Report title", report.title || "Отчет без названия"],
     ["Status", report.status || "Completed"],
