@@ -20,7 +20,7 @@
 
 ## 2. Настройка переменных окружения
 
-Конфигурация системы осуществляется через файл `.env` в корне проекта или через секцию `environment` в `docker-compose.yml`.
+Конфигурация системы осуществляется через файл `.env` (пример env находиться в env_example.txt) в корне проекта или через секцию `environment` в `docker-compose.yml`.
 
 ### А. Настройки Базы Данных и Redis (api-core):
 * `ConnectionStrings__DefaultConnection` — строка подключения к PostgreSQL. По умолчанию:
