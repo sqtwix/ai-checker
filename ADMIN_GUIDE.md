@@ -50,6 +50,12 @@
 
 ### Шаги для смены или добавления модели:
 1. Скачайте модель в формате `.gguf` (рекомендуется `Qwen/Qwen3.5-0.8B-Instruct-GGUF` или `Qwen/Qwen3.5-3B-Instruct-GGUF` для баланса скорости и качества).
+```shell
+curl -LO https://huggingface.co/mozilla-ai/llamafile_0.10/resolve/main/Qwen3.5-0.8B-Q8_0.llamafile
+
+# Make it executable (macOS/Linux/BSD)
+chmod +x Qwen3.5-0.8B-Q8_0.llamafile
+```
 2. Поместите файл в папку `models/` в корне проекта.
 3. В файле `docker-compose.yml` в секции сервиса `qwen-local` обновите переменную окружения `MODEL_PATH`:
    ```yaml
