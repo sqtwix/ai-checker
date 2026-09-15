@@ -1,99 +1,157 @@
-# Руководство разработчика — НейроЭксперт
+# Руководство разработчика
 
-Данное руководство содержит описание структуры кодовой базы проекта, логику работы мультиагентного конвейера, правила кодирования и инструкции по локальной разработке.
+## Архитектура
 
----
+- `frontend/` — React 19 + Vite, production-раздача через Nginx;
+- `api-core/` — ASP.NET Core 9, JWT, PostgreSQL, загрузка/парсинг и история;
+- `ai-driver/` — FastAPI и последовательный конвейер трёх агентов;
+- `llama-cpp/` — опциональный локальный OpenAI-compatible inference server.
 
-## 1. Структура проекта
+Production queue находится в PostgreSQL, а файлы незавершённых заданий — в
+volume `analysis-jobs`. `FOR UPDATE SKIP LOCKED` допускает несколько worker без
+двойной обработки. Схема изменяется только EF Core migrations.
 
-Репозиторий состоит из трех основных подпроектов:
+Redis в runtime не используется и поэтому удалён из production Compose и
+документации. Не заявляйте очередь Redis без её фактической реализации.
 
-```text
-ai-checker/
-├── api-core/             # Бэкенд на ASP.NET Core 9.0
-│   ├── ApiCore/
-│   │   ├── Controllers/  # Эндпоинты (AnalysisController, AuthController, UserController)
-│   │   ├── Data/         # Контекст EF Core (AppDbContext.cs)
-│   │   ├── Models/       # Сущности БД и DTO (AnalysisReport.cs, CourseBatchAnalysisResult.cs)
-│   │   └── Services/     # Бизнес-логика (FileParser, ValidationService, ReportsService, AnalysisService)
-│   └── ApiCore.sln
-│
-├── frontend/             # Фронтенд на React + Vite
-│   ├── src/
-│   │   ├── components/   # UI-компоненты (Pages.jsx, AccessibilityToolbar.jsx, Layout.jsx)
-│   │   ├── App.jsx       # Точка входа приложения и роутинг сценариев загрузки
-│   │   └── api.js        # API-клиент (интеграция с бэкендом api-core)
-│   └── package.json
-│
-├── ai-driver/            # Сервис управления ИИ-агентами на Python + FastAPI
-│   ├── backend/          # Логика агентов (agent_manager.py, agent_factory.py, agent_client.py)
-│   ├── controllers/      # Контроллеры обработки запросов (agent_controller.py)
-│   ├── schemas/          # Схемы запросов и ответов Pydantic (analysis_request.py, analysis_response.py)
-│   ├── system_prompts.json # Системные промпты для специализаций ИИ-агентов
-│   ├── main.py           # Точка входа uvicorn
-│   └── routes.py         # Эндпоинты API
-│
-└── llama-cpp/            # Сборка локального сервера llama.cpp
-```
+## Проверить всё одной командой
 
----
-
-## 2. Логика ИИ-конвейера (последовательный пайплайн)
-
-Обработка запроса в `ai-driver` реализует последовательный конвейер из трех специализированных ИИ-агентов (согласно ТЗ):
-
-1. **main-analyzer** (`Step 1`) — принимает исходные данные тестов и ответов студентов. Сравнивает ответы студентов с эталонами, оценивает их семантическое соответствие и выделяет критические паттерны массовых ошибок (где доля неверных ответов $\ge 40\%$).
-2. **anomalies-analyzer** (`Step 2`) — принимает исходные данные и результаты первого шага. Фокусируется на анализе времени прохождения тестов и оценок для поиска аномалий:
-   * **SpeedCheating**: быстрые ответы + высокий балл.
-   * **ExtremeStruggling**: медленные ответы + низкий балл.
-   * **SuspiciousMatch**: аномальное сходство ответов.
-3. **statistics-summarizer** (`Step 3`) — агрегирует выводы предыдущих шагов, генерирует общий методический вывод по успеваемости и формирует приоритетный список рекомендаций по оптимизации материалов курса.
-
-### Программная постобработка (Enrichment Step)
-Для исключения потери студентов с 100% правильных ответов (которых ИИ-агенты пропускают из-за отсутствия ошибок) в [agent_controller.py](file:///c:/Users/ivan2/ai-checker/ai-driver/controllers/agent_controller.py) внедрен метод `_enrich_and_complete_response`. Он сканирует исходный запрос и автоматически добавляет пропущенных студентов и их правильные ответы в результирующую структуру `student_detailed_analyses` с оценкой `100.0`.
-
----
-
-## 3. Кодировка файлов и BOM (Важно!)
-
-Для стабильной работы компилятора .NET (MSBuild) на системах Windows с отличными от UTF-8 кодовыми страницами (например, CP1251 на русскоязычных ОС) действует строгое правило:
-> **Все файлы исходного кода (C#, JS, JSX, Python), содержащие кириллические символы, должны быть сохранены в формате UTF-8 с BOM (Byte Order Mark, сигнатура `\xef\xbb\xbf`).**
-
-Для автоматического приведения кодировок файлов в соответствие с этим правилом в корне проекта доступен скрипт:
 ```bash
-python C:\Users\ivan2\.gemini\antigravity-ide\brain\<conversation-id>\scratch\fix_encodings.py
+make verify
 ```
 
----
+Требуются `.NET 9 SDK`, `Python 3.11+` и Docker Compose. При наличии Node.js
+20+/npm frontend проверяется локально; иначе `make verify` использует его
+production Docker build. Скрипт сам создаёт `ai-driver/.venv`, если её ещё нет.
 
-## 4. Локальный запуск для разработки
+## Локальный запуск компонентов
 
-Вы можете запускать сервисы локально на хост-машине вне контейнеров для отладки.
+Сначала создайте `.env` и поднимите PostgreSQL/AI-driver. PostgreSQL production-
+конфигурации не публикуется на host; dev override открывает его только на
+`127.0.0.1`:
 
-### А. Запуск бэкенда (api-core)
-Требуется установленный .NET 9.0 SDK и запущенные PostgreSQL и Redis (можно использовать из Docker Compose).
+```bash
+./scripts/init_env.sh
+./scripts/compose.sh -f docker-compose.yml -f docker-compose.dev.yml \
+  --env-file .env up -d postgres ai-driver
+```
+
+API:
+
 ```bash
 cd api-core/ApiCore/ApiCore
-dotnet run
+ConnectionStrings__DefaultConnection='Host=localhost;Port=5432;Database=aichecker;Username=aichecker;Password=YOUR_DEV_PASSWORD' \
+JwtSettings__Secret='LOCAL_DEV_SECRET_AT_LEAST_32_CHARACTERS' \
+AiDriver__Url='http://127.0.0.1:8000' \
+dotnet run --urls http://127.0.0.1:5000
 ```
-*Эндпоинт по умолчанию: `http://localhost:5000`*
 
-### Б. Запуск фронтенда (frontend)
-Требуется Node.js 18+.
+Frontend:
+
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
-*Адрес локального dev-сервера: `http://localhost:5173`*
 
-### В. Запуск ИИ-драйвера (ai-driver)
-Требуется Python 3.10+.
+Vite работает на `http://127.0.0.1:5173` и обращается к API на `5000`.
+
+AI-driver без Docker:
+
 ```bash
 cd ai-driver
-python -m venv .venv
-source .venv/bin/activate # или .venv\Scripts\activate на Windows
-pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
-*Эндпоинт по умолчанию: `http://localhost:8000`*
+
+Windows activation: `.venv\Scripts\activate`; команды запуска те же.
+
+Frontend demo:
+
+```bash
+cd frontend
+VITE_OFFLINE_MODE=true VITE_ENABLED_MODELS=deepseek npm run dev
+```
+
+## Контракты данных
+
+api-core отправляет `course_name`, список tests/questions/student attempts и
+nullable `time_spent_seconds`. Если LMS не экспортирует время, значение равно
+`null`: запрещено подменять его синтетическими числами и строить обвинения на
+несуществующей метрике.
+
+AI pipeline:
+
+1. `main-analyzer` — сравнение с эталоном и массовые ошибки;
+2. `anomalies-analyzer` — аномалии только по доступным данным;
+3. `statistics-summarizer` — итоговая сводка и рекомендации.
+
+Перед отправкой в AI реальные student id заменяются task-scoped HMAC aliases;
+в типизированном результате API восстанавливает исходные id. Свободный текст
+ответов всё равно может содержать персональные данные, поэтому подключение
+cloud/external provider требует утверждённого privacy agreement.
+
+Ошибка/timeout провайдера возвращает 502. Опциональный не-ИИ fallback включается
+только `ALLOW_PROGRAMMATIC_FALLBACK=true` и маркирует отчёт.
+
+## Тесты и проверки
+
+```bash
+dotnet build api-core/ApiCore/ApiCore/ApiCore.csproj -c Release
+dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -- \
+  'doc/Эталон ответов Python.csv' 'doc/Ответы студентов Python - Тест 1.csv'
+
+cd ai-driver
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/pip check
+
+cd ../frontend
+npm ci
+npm run lint
+npm run build
+```
+
+После запуска стека:
+
+```bash
+ai-driver/.venv/bin/python scripts/smoke_stack.py
+./scripts/backup_restore_smoke.sh
+python3 scripts/analysis_e2e.py \
+  --benchmark 'doc/Эталон ответов Python.csv' \
+  --response 'doc/Ответы студентов Python - Тест 1.csv'
+```
+
+Последняя команда проходит публичный frontend URL: регистрацию двух
+пользователей, ACL, загрузку, durable queue, реальный AI-анализ, проверку
+метрик/русского текста/исходных идентификаторов, историю, переименование,
+архивирование и восстановление. Она оставляет тестовые записи и предназначена
+только для отдельной development/acceptance-БД.
+
+Local provider использует canonical id `local_llm`; `qwen_local`, `qwen` и
+`local` поддерживаются только как legacy aliases. Managed режим запускает
+закреплённый llama.cpp и проверенный GGUF, external использует произвольный
+утверждённый OpenAI-compatible `/v1`. Проверка `/models` выполняется до записи
+задачи, а deploy требует также успешный chat completion.
+
+Новая migration:
+
+```bash
+dotnet ef migrations add MeaningfulName \
+  --project api-core/ApiCore/ApiCore/ApiCore.csproj \
+  --output-dir Migrations
+```
+
+Не возвращайте `EnsureCreated` или ad-hoc DDL в startup. Первая baseline
+migration специально идемпотентна, чтобы принять БД старых версий.
+
+## Правила релиза
+
+- Не коммитьте `.env`, модели, uploads, `node_modules`, `.venv`, `bin/obj` и pyc.
+- Используйте UTF-8; BOM не требуется ни .NET SDK, ни Python/JS.
+- Любое изменение входного формата сопровождайте новым ParserSmoke/test case.
+- Перед передачей заказчику: `make verify`, dependency audit, image build,
+  `./deploy.sh`, restore smoke и реальный тест каждого выбранного AI-провайдера.
+- Hosted CI находится в `.github/workflows/ci.yml`; deploy job добавляется только
+  после выбора registry, production target и secret store.
+- Полный список ручных gates находится в `RELEASE_GATE.md`.

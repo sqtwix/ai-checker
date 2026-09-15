@@ -1,36 +1,38 @@
-# React + Vite
+# Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## Development
 
-## Запуск без backend
+```bash
+npm ci
+npm run dev
+```
 
-Frontend умеет работать в offline/demo-режиме без backend. В этом режиме авторизация, история отчетов, создание и редактирование отчетов работают локально через `localStorage`.
+По умолчанию Vite доступен на `http://127.0.0.1:5173`, API — на
+`http://127.0.0.1:5000/api/v1`.
 
-Для запуска dev-сервера:
+Доступные модели задаются при сборке:
+
+```bash
+VITE_ENABLED_MODELS=deepseek,gigachat,local_llm npm run build
+```
+
+Demo без backend:
 
 ```bash
 VITE_OFFLINE_MODE=true npm run dev
 ```
 
-После запуска откройте адрес, который покажет Vite, обычно `http://127.0.0.1:5173`.
+Это демонстрационный режим с localStorage и шаблонными результатами, не AI-анализ.
 
-Для production-сборки offline-режим тоже нужно включать на этапе сборки:
+## Checks
 
 ```bash
-VITE_OFFLINE_MODE=true npm run build
+npm run lint
+npm run build
 ```
 
-Важно: переменные `VITE_*` встраиваются Vite во время build. Если используется Docker, передавайте `VITE_OFFLINE_MODE=true` как build arg/environment до сборки frontend-образа.
+Production Docker image использует `npm ci`, Nginx SPA fallback, `/api/` proxy,
+upload/timeouts, security headers и `/health`.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Пустой `VITE_ENABLED_MODELS` является штатным no-AI режимом: интерфейс истории
+и настроек доступен, запуск нового анализа заблокирован с объяснением.

@@ -3,6 +3,8 @@ using ApiCore.Models;
 using ApiCore.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Text.Json;
 
 namespace ApiCore.Controllers;
 
@@ -16,25 +18,37 @@ namespace ApiCore.Controllers;
 [Route("api/v1/analysis")]
 public class AnalysisController : ControllerBase
 {
-    private readonly AnalysisService _analysisService;
     private readonly AppDbContext _context;
-    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ReportsService _reportsService;
+    private readonly AiProviderAvailabilityService _providerAvailability;
+    private readonly IConfiguration _configuration;
 
-    public AnalysisController(AnalysisService analysisService, AppDbContext context, IServiceScopeFactory serviceScopeFactory, ReportsService reportsService)
+    private static readonly HashSet<string> BenchmarkExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".csv", ".xlsx", ".xls" };
+    private static readonly HashSet<string> ResponseExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".csv", ".xlsx", ".xls", ".zip" };
+    private static readonly HashSet<string> ModelTypes = new(StringComparer.OrdinalIgnoreCase)
+        { "deepseek", "gigachat", "sbergpt", "local_llm", "qwen_local", "qwen", "local" };
+
+    public AnalysisController(
+        AppDbContext context,
+        ReportsService reportsService,
+        AiProviderAvailabilityService providerAvailability,
+        IConfiguration configuration)
     {
-        _analysisService = analysisService;
         _context = context;
-        _serviceScopeFactory = serviceScopeFactory;
         _reportsService = reportsService;
+        _providerAvailability = providerAvailability;
+        _configuration = configuration;
     }
 
     [HttpPost("upload")]
-    [DisableRequestSizeLimit] // Чтобы методисты могли загружать тяжелые CSV/архивы
+    [EnableRateLimiting("uploads")]
     public async Task<IActionResult> UploadFiles(
         [FromForm] IFormFile benchmarkFile,           // Эталонный файл (JSON/CSV)
         [FromForm] List<IFormFile> userResponseFiles,    // Массив файлов с реальными ответами студентов
-        [FromForm] string modelType = "deepseek")     // Выбор нейросети (deepseek или gigachat)
+        [FromForm] string modelType = "deepseek",
+        CancellationToken cancellationToken = default)
     {
         // 1. Быстрая валидация (Критерий ТЗ: Обработка ошибок)
         if (benchmarkFile == null || benchmarkFile.Length == 0)
@@ -43,64 +57,131 @@ public class AnalysisController : ControllerBase
         if (userResponseFiles == null || !userResponseFiles.Any())
             return BadRequest(new { error = "Необходимо загрузить хотя бы один файл с ответами пользователей." });
 
+        var maxFileCount = _configuration.GetValue<int?>("Uploads:MaxResponseFileCount") ?? 50;
+        var maxFileSizeMb = _configuration.GetValue<long?>("Uploads:MaxFileSizeMb") ?? 50;
+        var maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+
+        if (userResponseFiles.Count > maxFileCount)
+            return BadRequest(new { error = $"За один запуск можно загрузить не более {maxFileCount} файлов ответов." });
+
+        if (!ModelTypes.Contains(modelType))
+            return BadRequest(new { error = "Неизвестная модель. Допустимые значения: deepseek, gigachat, local_llm." });
+
+        if (!BenchmarkExtensions.Contains(Path.GetExtension(benchmarkFile.FileName)))
+            return BadRequest(new { error = "Эталонный файл должен иметь формат CSV, XLSX или XLS." });
+
+        var invalidResponse = userResponseFiles.FirstOrDefault(file =>
+            !ResponseExtensions.Contains(Path.GetExtension(file.FileName)));
+        if (invalidResponse != null)
+            return BadRequest(new { error = $"Файл '{Path.GetFileName(invalidResponse.FileName)}' имеет неподдерживаемый формат." });
+
+        if (benchmarkFile.Length > maxFileSizeBytes || userResponseFiles.Any(file => file.Length > maxFileSizeBytes))
+            return BadRequest(new { error = $"Размер каждого файла не должен превышать {maxFileSizeMb} МБ." });
+
         var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized(new { error = "Пользователь не авторизован." });
         }
 
+        var canonicalModel = modelType.ToLowerInvariant() switch
+        {
+            "gigachat" or "sbergpt" => "gigachat",
+            "local_llm" or "qwen_local" or "qwen" or "local" => "local_llm",
+            _ => "deepseek"
+        };
+        if (!await _providerAvailability.IsAvailableAsync(canonicalModel, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Выбранный AI-провайдер не настроен или недоступен. Обратитесь к администратору.",
+                code = "MODEL_UNAVAILABLE"
+            });
+        }
+
+        var queueCapacity = Math.Max(1, _configuration.GetValue<int?>("AnalysisQueue:Capacity") ?? 20);
+        var activeJobs = await _context.AnalysisReports.CountAsync(
+            report => report.Status == "Queued" || report.Status == "Retrying" || report.Status == "Processing",
+            cancellationToken);
+        if (activeJobs >= queueCapacity)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Очередь анализа временно заполнена. Повторите попытку позже."
+            });
+        }
+
         // 2. Генерируем уникальный ID для этой задачи анализа
         var taskId = Guid.NewGuid().ToString();
 
         // Создаем временную папку для сохранения файлов в пределах запроса
-        var tempDir = Path.Combine(Directory.GetCurrentDirectory(), "temp_uploads", taskId);
+        var jobsRoot = _configuration["AnalysisQueue:JobsDirectory"]
+            ?? Path.Combine(Directory.GetCurrentDirectory(), "analysis_jobs");
+        var tempDir = Path.Combine(Path.GetFullPath(jobsRoot), taskId);
         Directory.CreateDirectory(tempDir);
 
-        var benchmarkPath = Path.Combine(tempDir, benchmarkFile.FileName);
-        using (var stream = new FileStream(benchmarkPath, FileMode.Create))
+        try
         {
-            await benchmarkFile.CopyToAsync(stream);
-        }
-
-        var userResponsePaths = new List<string>();
-        foreach (var file in userResponseFiles)
-        {
-            var path = Path.Combine(tempDir, file.FileName);
-            using (var stream = new FileStream(path, FileMode.Create))
+            var benchmarkPath = BuildSafeUploadPath(tempDir, benchmarkFile.FileName, "benchmark");
+            await using (var stream = new FileStream(benchmarkPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                await file.CopyToAsync(stream);
+                await benchmarkFile.CopyToAsync(stream, cancellationToken);
             }
-            userResponsePaths.Add(path);
+
+            var userResponsePaths = new List<string>();
+            for (var index = 0; index < userResponseFiles.Count; index++)
+            {
+                var file = userResponseFiles[index];
+                var path = BuildSafeUploadPath(tempDir, file.FileName, $"response-{index + 1}");
+                await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await file.CopyToAsync(stream, cancellationToken);
+                userResponsePaths.Add(path);
+            }
+
+            var courseName = FileParser.ExtractCourseName(Path.GetFileName(benchmarkFile.FileName));
+            var report = new AnalysisReport
+            {
+                Id = taskId,
+                UserId = userId,
+                CourseName = courseName,
+                Status = "Queued",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                ModelType = canonicalModel,
+                PayloadJson = JsonSerializer.Serialize(new AnalysisJobPayload(
+                    benchmarkPath,
+                    userResponsePaths,
+                    tempDir,
+                    HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault()))
+            };
+            _context.AnalysisReports.Add(report);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return Accepted(new
+            {
+                task_id = taskId,
+                message = "Файлы проверены и поставлены в очередь анализа."
+            });
         }
-
-        // Сохраняем информацию об отчете в базу данных
-        var courseName = FileParser.ExtractCourseName(benchmarkFile.FileName);
-        var report = new AnalysisReport
+        catch
         {
-            Id = taskId,
-            UserId = userId,
-            CourseName = courseName,
-            Status = "Processing",
-            CreatedAt = DateTime.UtcNow
-        };
-        _context.AnalysisReports.Add(report);
-        await _context.SaveChangesAsync();
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+            throw;
+        }
+    }
 
-        // 3. Отдаем парсинг и отправку в фоновый сервис БЕЗ await, чтобы не блокировать фронтенд
-        // Используем IServiceScopeFactory, чтобы scoped-зависимости (такие как AppDbContext) не уничтожались при завершении HTTP-запроса
-        _ = Task.Run(async () =>
-        {
-            using var scope = _serviceScopeFactory.CreateScope();
-            var scopedService = scope.ServiceProvider.GetRequiredService<AnalysisService>();
-            await scopedService.ProcessAnalysisAsync(taskId, userId, benchmarkPath, userResponsePaths, modelType, tempDir);
-        });
-
-        // Возвращаем фронту ID задачи. Фронт начнет слушать WebSocket/SignalR с этим ID
-        return Accepted(new
-        {
-            task_id = taskId,
-            message = "Файлы успешно прошли первичную валидацию и приняты в обработку ИИ-агентами."
-        });
+    private static string BuildSafeUploadPath(string directory, string originalName, string prefix)
+    {
+        var extension = Path.GetExtension(Path.GetFileName(originalName)).ToLowerInvariant();
+        var originalStem = Path.GetFileNameWithoutExtension(Path.GetFileName(originalName));
+        var safeStem = new string(originalStem
+            .Where(character => char.IsLetterOrDigit(character) || character is ' ' or '-' or '_' or '.')
+            .Take(120)
+            .ToArray()).Trim();
+        if (string.IsNullOrWhiteSpace(safeStem)) safeStem = "uploaded-file";
+        var targetDirectory = Path.Combine(directory, prefix);
+        Directory.CreateDirectory(targetDirectory);
+        return Path.Combine(targetDirectory, safeStem + extension);
     }
 
     [HttpGet("status/{taskId}")]
@@ -131,17 +212,6 @@ public class AnalysisController : ControllerBase
                 status = report.Status,
                 result = result,
                 error = report.Error
-            });
-        }
-
-        // Резервный поиск во временном in-memory кэше
-        if (AnalysisService.TaskTracker.TryGetValue(taskId, out var task))
-        {
-            return Ok(new
-            {
-                status = task.Status,
-                result = task.Result,
-                error = task.Error
             });
         }
 

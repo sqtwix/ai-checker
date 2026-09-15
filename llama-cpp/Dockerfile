@@ -1,5 +1,5 @@
 # Базовый образ llama.cpp с уже собранным сервером
-FROM ghcr.io/ggml-org/llama.cpp:server
+FROM ghcr.io/ggml-org/llama.cpp:server@sha256:2e22fe614481e58c56ba665399b015fc8906a20203a20843e91c06e3fbed7e47
 
 # Установка curl для healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -14,8 +14,11 @@ RUN sed -i 's/\r$//' /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Healthcheck для проверки готовности сервера
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-    CMD curl -f http://localhost:8080/health || exit 1
+# Large GGUF files mounted from Docker Desktop/Colima can need several minutes
+# for the initial sequential read. Keep the container in "starting" state while
+# llama.cpp is legitimately loading instead of reporting a false failure.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
+    CMD curl --silent --show-error --fail http://localhost:8080/health || exit 1
 
 # Открываем порт для API
 EXPOSE 8080

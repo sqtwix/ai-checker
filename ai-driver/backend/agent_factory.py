@@ -8,11 +8,11 @@ import os
 # thats will be operate by AgentManager
 
 # AgentManager will get Agents from factory and call execute metod from AgentClient
-# AgentFactory can create both groups of Agent (DeepSeek, SberGpt and local Qwen)
+# AgentFactory creates DeepSeek, GigaChat and OpenAI-compatible local agents.
 
 # DeepSeek use DEEPSEEK_ global variables from dotenv
 # SberGpt use SBERGPT_ global variables from dotenv
-# Local Qwen use QWEN_LOCAL_ global variables from dotenv
+# Legacy QWEN_LOCAL_ variables are accepted only for compatibility.
 # For llama.cpp the base_url must end with /v1
 # Model name must match --alias parameter of llama-server
 
@@ -43,17 +43,16 @@ class AgentFactory:
                 base_url = os.getenv("SBERGPT_BASE_URL", "https://gigachat.devices.sberbank.ru/api/v1/")
                 agent_model = os.getenv("SBERGPT_MODEL", "GigaChat-Pro")
 
-            case "qwen_local":
-                # llama.cpp OpenAI-совместимый сервер:
-                # - не требует аутентификации
-                # - base_url должен заканчиваться на /v1
-                # - model это алиас установленный через --alias
-                api_key = "not-needed"
-                base_url = os.getenv("QWEN_LOCAL_URL", "http://localhost:8080/v1")
-                agent_model = os.getenv("QWEN_LOCAL_MODEL", "local-model")
+            case "local_llm" | "qwen_local" | "qwen" | "local":
+                api_key = os.getenv("LOCAL_LLM_API_KEY") or "not-needed"
+                base_url = os.getenv("LOCAL_LLM_BASE_URL") or os.getenv("QWEN_LOCAL_URL", "http://localhost:8080/v1")
+                agent_model = os.getenv("LOCAL_LLM_MODEL") or os.getenv("QWEN_LOCAL_MODEL", "local-model")
 
             case _:
                 raise Exception("AgentFabric Creating Queue Exception: unsupported model type - " + model)
+
+        if model in {"deepseek", "sbergpt"} and not api_key:
+            raise Exception(f"{model} API key is not configured")
 
         try:
             for specialization in self.SPECIALIZATIONS:

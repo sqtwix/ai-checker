@@ -39,8 +39,12 @@ public class AppDbContext : DbContext
         {
             entity.Property(r => r.ResultJson)
                 .HasColumnType("jsonb");
+            entity.Property(r => r.PayloadJson)
+                .HasColumnType("jsonb");
             entity.HasIndex(r => r.UserId)
                 .HasDatabaseName("ix_analysis_reports_user_id");
+            entity.HasIndex(r => new { r.Status, r.NextRetryAt, r.CreatedAt })
+                .HasDatabaseName("ix_analysis_reports_queue");
         });
     }
 }

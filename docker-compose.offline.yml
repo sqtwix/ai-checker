@@ -1,0 +1,17 @@
+name: ai-checker-offline-demo
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_OFFLINE_MODE: "true"
+        NGINX_CONF: nginx.offline.conf
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

@@ -6,6 +6,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,11 +19,21 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddControllers();
 
+var maxUploadSizeMb = builder.Configuration.GetValue<long?>("Uploads:MaxRequestSizeMb") ?? 100;
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadSizeMb * 1024 * 1024;
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+        var configuredOrigins = builder.Configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>() ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+        policy.WithOrigins(configuredOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -28,6 +42,10 @@ builder.Services.AddCors(options =>
 // 2. НАСТРОЙКА JWT ВАЛИДАЦИИ (Этого блока не хватало)
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSettings["Secret"] ?? throw new InvalidOperationException("JWT Secret is missing.");
+if (secretKey.Length < 32)
+{
+    throw new InvalidOperationException("JWT Secret must contain at least 32 characters.");
+}
 
 builder.Services.AddAuthentication(options =>
 {
@@ -50,6 +68,28 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
+    options.AddPolicy("uploads", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
+});
 
 // 3. НАСТРОЙКА OPENAPI / SWAGGER
 builder.Services.AddOpenApi(options =>
@@ -74,7 +114,7 @@ builder.Services.AddOpenApi(options =>
             {
                 Type = "string",
                 Format = "binary",
-                Description = "Эталонный файл с ответами курса (.csv / .json)"
+                Description = "Эталонный файл с ответами курса (.csv / .xls / .xlsx)"
             });
 
             formSchema.Properties.Add("userResponseFiles", new OpenApiSchema
@@ -88,7 +128,7 @@ builder.Services.AddOpenApi(options =>
             {
                 Type = "string",
                 Default = new OpenApiString("deepseek"),
-                Description = "Модель ИИ (deepseek или gigachat)"
+                Description = "Модель ИИ (deepseek, gigachat или local_llm)"
             });
 
             operation.RequestBody.Content.Add("multipart/form-data", new OpenApiMediaType
@@ -144,14 +184,64 @@ builder.Services.AddSingleton<ValidationService>();
 builder.Services.AddScoped<FileParser>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ReportsService>();
+builder.Services.AddHostedService<AnalysisWorker>();
 builder.Services.AddHttpClient<AnalysisService>(client =>
 {
     var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
     client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
-    client.Timeout = TimeSpan.FromMinutes(5); // Увеличиваем таймаут для медленных CPU запусков локальных моделей
+    var timeoutSeconds = Math.Clamp(
+        builder.Configuration.GetValue<int?>("AnalysisQueue:PipelineTimeoutSeconds") ?? 1200,
+        60,
+        3600);
+    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+});
+builder.Services.AddHttpClient<AiProviderAvailabilityService>(client =>
+{
+    var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
+    client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddHttpClient("ai-driver-health", client =>
+{
+    var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
+    client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
+    client.Timeout = TimeSpan.FromSeconds(3);
 });
 
 var app = builder.Build();
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
+app.Use(async (context, next) =>
+{
+    var incoming = context.Request.Headers["X-Correlation-ID"].FirstOrDefault();
+    var correlationId = !string.IsNullOrWhiteSpace(incoming)
+        && incoming.Length <= 64
+        && incoming.All(character => char.IsLetterOrDigit(character) || character is '-' or '_' or '.')
+            ? incoming
+            : Guid.NewGuid().ToString("N");
+    context.Response.Headers["X-Correlation-ID"] = correlationId;
+    var started = System.Diagnostics.Stopwatch.StartNew();
+    using (app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+    {
+        try
+        {
+            await next();
+        }
+        finally
+        {
+            app.Logger.LogInformation(
+                "HTTP {Method} {Path} returned {StatusCode} in {ElapsedMs} ms",
+                context.Request.Method,
+                context.Request.Path,
+                context.Response.StatusCode,
+                started.Elapsed.TotalMilliseconds);
+        }
+    }
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -171,44 +261,88 @@ for (int retry = 0; retry < 5; retry++)
         using (var scope = app.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            dbContext.Database.EnsureCreated();
-
-            // Гарантируем создание таблицы для существующих баз данных (EnsureCreated не создает новые таблицы в существующей БД)
-            dbContext.Database.ExecuteSqlRaw(@"
-                CREATE TABLE IF NOT EXISTS analysis_reports (
-                    id VARCHAR(255) PRIMARY KEY,
-                    user_id UUID NOT NULL,
-                    course_name VARCHAR(255) NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                    status VARCHAR(50) NOT NULL,
-                    result_json JSONB,
-                    error TEXT,
-                    CONSTRAINT fk_analysis_reports_users FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                );
-                CREATE INDEX IF NOT EXISTS ix_analysis_reports_user_id ON analysis_reports (user_id);
-            ");
-
-            // Также гарантируем наличие колонки settings_json в таблице users и is_archived в analysis_reports
-            dbContext.Database.ExecuteSqlRaw(@"
-                ALTER TABLE users ADD COLUMN IF NOT EXISTS settings_json JSONB;
-                ALTER TABLE analysis_reports ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
-            ");
+            await dbContext.Database.MigrateAsync();
         }
         Console.WriteLine(">>>> [УСПЕХ] Успешное подключение к PostgreSQL.");
+
+        // Jobs with a persisted payload are recoverable after an API restart.
+        // Legacy jobs have no payload and therefore fail explicitly.
+        using (var recoveryScope = app.Services.CreateScope())
+        {
+            var recoveryDb = recoveryScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await recoveryDb.AnalysisReports
+                .Where(report => report.Status == "Processing" && report.PayloadJson != null)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(report => report.Status, "Retrying")
+                    .SetProperty(report => report.NextRetryAt, DateTime.UtcNow)
+                    .SetProperty(report => report.Error, "Обработка автоматически продолжена после перезапуска сервиса.")
+                    .SetProperty(report => report.UpdatedAt, DateTime.UtcNow));
+            var unrecoverableIds = await recoveryDb.AnalysisReports
+                .Where(report =>
+                    (report.Status == "Queued" || report.Status == "Retrying" || report.Status == "Processing")
+                    && report.PayloadJson == null)
+                .Select(report => report.Id)
+                .ToListAsync();
+            if (unrecoverableIds.Count > 0)
+            {
+                await recoveryDb.AnalysisReports
+                    .Where(report => unrecoverableIds.Contains(report.Id))
+                    .ExecuteUpdateAsync(update => update
+                    .SetProperty(report => report.Status, "Failed")
+                    .SetProperty(report => report.NextRetryAt, (DateTime?)null)
+                    .SetProperty(report => report.Error, "Задачу нельзя восстановить после перезапуска сервиса. Запустите анализ повторно.")
+                    .SetProperty(report => report.UpdatedAt, DateTime.UtcNow));
+
+                var jobsRoot = Path.GetFullPath(builder.Configuration["AnalysisQueue:JobsDirectory"]
+                    ?? Path.Combine(Directory.GetCurrentDirectory(), "analysis_jobs"));
+                foreach (var id in unrecoverableIds.Where(id => Guid.TryParse(id, out _)))
+                {
+                    var abandonedDirectory = Path.Combine(jobsRoot, id);
+                    if (Directory.Exists(abandonedDirectory))
+                    {
+                        Directory.Delete(abandonedDirectory, true);
+                        app.Logger.LogWarning("Removed unrecoverable job directory for analysis {TaskId}", id);
+                    }
+                }
+            }
+        }
         break;
     }
     catch
     {
         if (retry == 4) throw;
         Console.WriteLine($">>>> [ОЖИДАНИЕ] База данных еще создается (Попытка {retry + 1}/5)...");
-        Thread.Sleep(2000);
+        await Task.Delay(2000);
     }
 }
 
 // 6. MIDDLEWARE (Порядок строго критичен!)
 app.UseCors("AllowFrontend");
 app.UseAuthentication(); // СНАЧАЛА: Расшифровываем токен и узнаем кто это
+app.UseRateLimiter();
 app.UseAuthorization();  // ЗАТЕМ: Проверяем права доступа к методам
+
+app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }))
+    .AllowAnonymous();
+
+app.MapGet("/health/ready", async (AppDbContext dbContext, IHttpClientFactory httpClientFactory) =>
+{
+    var databaseReady = await dbContext.Database.CanConnectAsync();
+    var aiDriverReady = false;
+    try
+    {
+        using var response = await httpClientFactory.CreateClient("ai-driver-health").GetAsync("health");
+        aiDriverReady = response.IsSuccessStatusCode;
+    }
+    catch (HttpRequestException) { }
+    catch (TaskCanceledException) { }
+
+    var payload = new { status = databaseReady && aiDriverReady ? "ready" : "unready", database = databaseReady, ai_driver = aiDriverReady };
+    return databaseReady && aiDriverReady
+        ? Results.Ok(payload)
+        : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
+})
+    .AllowAnonymous();
 
 // Глобальная защита эндпоинтов
 app.MapControllers().RequireAuthorization();

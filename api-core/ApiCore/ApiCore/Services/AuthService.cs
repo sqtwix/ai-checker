@@ -24,9 +24,12 @@ public class AuthService
 
     public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
     {
-        // Проверяем асинхронно, занято ли имя пользователя ИЛИ почта
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var normalizedUsername = request.Username.Trim();
+
+        // Проверяем асинхронно, занята ли почта.
         var userExists = await _context.Users
-            .AnyAsync(u => u.Email.ToLower() == request.Email.ToLower());
+            .AnyAsync(u => u.Email == normalizedEmail);
 
         if (userExists)
         {
@@ -36,13 +39,20 @@ public class AuthService
         var newUser = new User
         {
             Id = Guid.NewGuid(),
-            Username = request.Username,
-            Email = request.Email,
-            PasswordHash = _passwordHasher.HashPassword(request.Username, request.Password)
+            Username = normalizedUsername,
+            Email = normalizedEmail,
+            PasswordHash = _passwordHasher.HashPassword(normalizedUsername, request.Password)
         };
 
         await _context.Users.AddAsync(newUser);
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            return null;
+        }
 
         var token = GenerateJwtToken(newUser);
         return new AuthResponse { Token = token, Username = newUser.Username };
@@ -51,8 +61,9 @@ public class AuthService
     public async Task<AuthResponse?> LoginAsync(LoginRequest request)
     {
         // Ищем пользователя в БД по имени
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == request.Email.ToLower());
+            .FirstOrDefaultAsync(u => u.Email == normalizedEmail);
 
         if (user == null) return null;
 

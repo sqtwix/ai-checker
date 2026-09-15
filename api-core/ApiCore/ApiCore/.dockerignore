@@ -1,0 +1,5 @@
+bin
+obj
+.git
+temp_uploads
+*.user

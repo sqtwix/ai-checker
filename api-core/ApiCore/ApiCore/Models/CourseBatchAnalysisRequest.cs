@@ -75,5 +75,5 @@ public class AiUserAnswerDto
     public bool IsCorrectByLms { get; set; }
 
     [JsonPropertyName("time_spent_seconds")]
-    public int TimeSpentSeconds { get; set; }
+    public int? TimeSpentSeconds { get; set; }
 }

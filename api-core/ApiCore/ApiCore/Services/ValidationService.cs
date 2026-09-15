@@ -5,7 +5,7 @@ namespace ApiCore.Services;
 
 public class ValidationService
 {
-    private readonly string[] _allowedExtensions = { ".csv", ".json", ".xlsx", ".xls" };
+    private readonly string[] _allowedExtensions = { ".csv", ".xlsx", ".xls" };
     private readonly string[] _requiredUserHeaders = { "Пользователь", "Дата", "Статус", "Баллы" };
 
     public ValidationResult ValidateFiles(string benchmarkPath, List<string> userResponsePaths)
@@ -38,7 +38,7 @@ public class ValidationService
         var ext = Path.GetExtension(filePath).ToLowerSuffix();
         if (!_allowedExtensions.Contains(ext))
         {
-            result.AddError($"{fileLabel} имеет недопустимое расширение '{ext}'. Допускаются только: .csv, .json, .xlsx");
+            result.AddError($"{fileLabel} имеет недопустимое расширение '{ext}'. Допускаются только: .csv, .xlsx, .xls");
         }
     }
 

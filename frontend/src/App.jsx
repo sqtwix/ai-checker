@@ -8,6 +8,7 @@ import {
   getAnalysisHistory,
   renameAnalysisReport,
   isOfflineMode,
+  enabledModels,
   seedOfflineReports,
   createOfflineReport,
   updateOfflineReport,
@@ -20,12 +21,12 @@ import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
 import { AuthPage, SettingsPage, StudentsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
-import {
-  exportReportToCsv,
-  exportReportToJson,
-  exportReportToPdf,
-  exportReportToXlsx,
-} from "./reportExport";
+
+const navigateTo = (route) => {
+  window.location.hash = route;
+};
+
+const createToastId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 // Initial Mock Reports Data representing ChatGPT-like dialog history
 function generateMockResult(reportId) {
@@ -304,10 +305,10 @@ function App() {
     return window.location.hash.replace("#", "") || "upload";
   });
   const [mockReports, setMockReports] = useState([]);
-  const [selectedModel, setSelectedModel] = useState("DeepSeek");
+  const [selectedModel, setSelectedModel] = useState(enabledModels[0]?.value || "");
   const [selectedBenchFile, setSelectedBenchFile] = useState(null);
   const [selectedResponseFiles, setSelectedResponseFiles] = useState([]);
-  const [showValidation, setShowValidation] = useState(false);
+  const showValidation = Boolean(selectedBenchFile && selectedResponseFiles.length > 0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisTaskId, setAnalysisTaskId] = useState("");
@@ -337,7 +338,6 @@ function App() {
 
   const benchInputRef = useRef(null);
   const responsesInputRef = useRef(null);
-  const intervalRef = useRef(null);
   const saveActionsRef = useRef(null);
   const profileActionsRef = useRef(null);
 
@@ -416,7 +416,7 @@ function App() {
   const [manualTitle, setManualTitle] = useState("Черновик offline-отчета");
 
   const notify = (toast) => {
-    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const id = createToastId();
     setToasts((currentToasts) => [...currentToasts, { id, type: "info", ...toast }]);
     window.setTimeout(() => {
       setToasts((currentToasts) => currentToasts.filter((currentToast) => currentToast.id !== id));
@@ -466,7 +466,7 @@ function App() {
     return {
       id: apiReport.id,
       course: apiReport.courseName || "Электронный курс",
-      title: result.global_course_summary || (apiReport.status === "Processing" ? "Анализ выполняется..." : "Анализ провалился"),
+      title: result.global_course_summary || (["Queued", "Retrying", "Processing"].includes(apiReport.status) ? "Анализ выполняется..." : "Анализ провалился"),
       errors: mappedErrors,
       recommendations: mappedRecommendations,
       status: apiReport.status,
@@ -573,7 +573,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const hasProcessing = mockReports.some(r => r.status === "Processing");
+    const hasProcessing = mockReports.some(r => ["Queued", "Retrying", "Processing"].includes(r.status));
     if (!hasProcessing) return;
 
     const interval = setInterval(() => {
@@ -592,9 +592,9 @@ function App() {
       const hasToken = !!localStorage.getItem("token");
 
       if (!hasToken && !isAuthRoute) {
-        window.location.hash = "login";
+        navigateTo("login");
       } else if (hasToken && isAuthRoute) {
-        window.location.hash = "upload";
+        navigateTo("upload");
       } else {
         setRoute(newRoute);
       }
@@ -610,10 +610,10 @@ function App() {
     const hasToken = !!localStorage.getItem("token");
 
     if (!hasToken && !isAuthRoute) {
-      window.location.hash = "login";
+      navigateTo("login");
       setRoute("login");
     } else if (hasToken && isAuthRoute) {
-      window.location.hash = "upload";
+      navigateTo("upload");
       setRoute("upload");
     } else {
       setRoute(initialRoute);
@@ -622,7 +622,6 @@ function App() {
     window.addEventListener("hashchange", handleHashChange);
     return () => {
       window.removeEventListener("hashchange", handleHashChange);
-      if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
 
@@ -672,7 +671,7 @@ function App() {
         setUserEmail(loginEmail);
         setLoginEmail("");
         setLoginPassword("");
-        window.location.hash = "upload";
+        navigateTo("upload");
       } else {
         throw new Error("Неверный формат ответа сервера.");
       }
@@ -702,7 +701,7 @@ function App() {
         setRegisterUsername("");
         setRegisterEmail("");
         setRegisterPassword("");
-        window.location.hash = "upload";
+        navigateTo("upload");
       } else {
         throw new Error("Неверный формат ответа сервера.");
       }
@@ -720,7 +719,7 @@ function App() {
     setUser("");
     setUserEmail("");
     setRoute("login");
-    window.location.hash = "login";
+    navigateTo("login");
   };
 
   // Handle responsive mobile drawer class toggles on body
@@ -749,24 +748,13 @@ function App() {
     }
   };
 
-  // Trigger validation banner visibility
-  useEffect(() => {
-    if (selectedBenchFile && selectedResponseFiles.length > 0) {
-      setShowValidation(true);
-    } else {
-      setShowValidation(false);
-    }
-  }, [selectedBenchFile, selectedResponseFiles]);
-
   const resetUploadForm = () => {
     setSelectedBenchFile(null);
     setSelectedResponseFiles([]);
-    setShowValidation(false);
     setIsAnalyzing(false);
     setAnalysisProgress(0);
     if (benchInputRef.current) benchInputRef.current.value = "";
     if (responsesInputRef.current) responsesInputRef.current.value = "";
-    if (intervalRef.current) clearInterval(intervalRef.current);
   };
 
   const startAnalysis = async () => {
@@ -796,25 +784,27 @@ function App() {
         message: data.message || "Файлы успешно отправлены и приняты в обработку.",
       });
 
-      let progress = 0;
-      let hasCompleted = false;
-
-      // Local progress helper that goes slowly up to 90%
-      intervalRef.current = setInterval(() => {
-        if (!hasCompleted) {
-          progress += Math.floor(Math.random() * 4) + 1;
-          if (progress > 90) progress = 90;
-          setAnalysisProgress(progress);
-        }
-      }, 1000);
+      setAnalysisProgress(10);
 
       // Polling function
+      let pollAttempts = 0;
+      let consecutivePollErrors = 0;
       const poll = async () => {
+        pollAttempts += 1;
+        if (pollAttempts > 200) {
+          setIsAnalyzing(false);
+          notify({
+            type: "error",
+            title: "Истекло время ожидания",
+            message: "Задача продолжает храниться в истории. Обновите страницу и проверьте ее статус позже.",
+          });
+          return;
+        }
+
         try {
           const statusRes = await getAnalysisStatus(serverTaskId);
+          consecutivePollErrors = 0;
           if (statusRes.status === "Completed") {
-            hasCompleted = true;
-            clearInterval(intervalRef.current);
             setAnalysisProgress(100);
 
             // Construct new report based on real result from model
@@ -855,7 +845,6 @@ function App() {
             setShowNamingModal(true);
             resetUploadForm();
           } else if (statusRes.status === "Failed") {
-            clearInterval(intervalRef.current);
             setIsAnalyzing(false);
             await fetchHistory();
             notify({
@@ -864,13 +853,22 @@ function App() {
               message: statusRes.error || "Неизвестная ошибка на стороне сервера.",
             });
           } else {
-            // Processing... Continue polling after timeout
+            setAnalysisProgress(statusRes.status === "Processing" ? 60 : 25);
             setTimeout(poll, 3000);
           }
         } catch (err) {
           console.error("Polling error:", err);
-          // Retry polling in case of transient network issues
-          setTimeout(poll, 3000);
+          consecutivePollErrors += 1;
+          if (consecutivePollErrors >= 5) {
+            setIsAnalyzing(false);
+            notify({
+              type: "error",
+              title: "Связь с сервером потеряна",
+              message: "Проверьте подключение. Задача сохранена в истории и может продолжить выполняться.",
+            });
+          } else {
+            setTimeout(poll, 3000);
+          }
         }
       };
 
@@ -907,7 +905,7 @@ function App() {
         title: "Название сохранено",
         message: "Отчет добавлен в историю анализов.",
       });
-      window.location.hash = `report-detail-${namingTaskId}`;
+      navigateTo(`report-detail-${namingTaskId}`);
     } catch (err) {
       notify({
         type: "error",
@@ -922,7 +920,7 @@ function App() {
   const handleSkipNaming = async () => {
     setShowNamingModal(false);
     await fetchHistory();
-    window.location.hash = `report-detail-${namingTaskId}`;
+    navigateTo(`report-detail-${namingTaskId}`);
   };
 
   const handleInlineRenameSubmit = async (e) => {
@@ -1027,7 +1025,7 @@ function App() {
         recommendations: ["Уточните содержание отчета в редакторе offline mode."],
       });
       await fetchHistory();
-      window.location.hash = `report-detail-${report.id}`;
+      navigateTo(`report-detail-${report.id}`);
       notify({
         type: "success",
         title: "Черновик создан",
@@ -1056,7 +1054,7 @@ function App() {
       const archivedRoute = `report-detail-${archiveTargetId}`;
       setArchiveTargetId("");
       if (route === archivedRoute) {
-        window.location.hash = "upload";
+        navigateTo("upload");
       }
       notify({
         type: "success",
@@ -1093,6 +1091,13 @@ function App() {
   const handleExportReport = async (report, format) => {
     setIsSaveMenuOpen(false);
     try {
+      const {
+        exportReportToCsv,
+        exportReportToJson,
+        exportReportToPdf,
+        exportReportToXlsx,
+      } = await import("./reportExport");
+
       if (format === "pdf") {
         await exportReportToPdf(report);
         notify({ type: "success", title: "PDF сохранен" });
@@ -1139,7 +1144,7 @@ function App() {
               <section className="panel">
                 <p className="eyebrow">Новый анализ</p>
                 <h2>Загрузите эталон и ответы студентов</h2>
-                <p className="muted">Поддерживаются CSV, JSON и XLSX (для ответов также поддерживаются ZIP-архивы). Если файл пустой или в нём не хватает колонок, система покажет понятную ошибку до запуска ИИ.</p>
+                <p className="muted">Поддерживаются CSV, XLS и XLSX (для ответов также поддерживаются ZIP-архивы). Если файл пустой или в нём не хватает колонок, система покажет понятную ошибку до запуска ИИ.</p>
 
                 <div
                   className="dropzone"
@@ -1149,13 +1154,13 @@ function App() {
                 >
                   <span><Upload size={30} strokeWidth={2.2} /></span>
                   <strong id="bench-file-name">{selectedBenchFile ? selectedBenchFile.name : "Эталонный файл"}</strong>
-                  <p>Кликните для выбора benchmark.csv, benchmark.json или benchmark.xlsx</p>
+                  <p>Кликните для выбора benchmark.csv, benchmark.xls или benchmark.xlsx</p>
                   <input
                     type="file"
                     id="bench-input"
                     ref={benchInputRef}
                     style={{ display: "none" }}
-                    accept=".csv,.json,.xlsx"
+                    accept=".csv,.xlsx,.xls"
                     onChange={(e) => handleFileChange(e, "bench")}
                   />
                 </div>
@@ -1174,14 +1179,14 @@ function App() {
                       ? selectedResponseFiles[0].name
                       : `Выбрано файлов: ${selectedResponseFiles.length}`}
                   </strong>
-                  <p>Кликните для выбора файлов (.csv, .json, .xlsx) или ZIP-архива</p>
+                  <p>Кликните для выбора файлов (.csv, .xls, .xlsx) или ZIP-архива</p>
                   <input
                     type="file"
                     id="responses-input"
                     ref={responsesInputRef}
                     style={{ display: "none" }}
                     multiple
-                    accept=".csv,.json,.xlsx,.zip"
+                    accept=".csv,.xlsx,.xls,.zip"
                     onChange={(e) => handleFileChange(e, "responses")}
                   />
                 </div>
@@ -1192,28 +1197,23 @@ function App() {
                 <h3>Выбор ИИ-модели</h3>
                 <label className="field-label">ИИ-модель</label>
                 <div className="segmented" id="model-selector-container">
-                  <button
-                    type="button"
-                    className={selectedModel === "DeepSeek" ? "selected" : ""}
-                    onClick={() => setSelectedModel("DeepSeek")}
-                  >
-                    DeepSeek
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedModel === "GigaChat" ? "selected" : ""}
-                    onClick={() => setSelectedModel("GigaChat")}
-                  >
-                    GigaChat
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedModel === "Qwen_Local" ? "selected" : ""}
-                    onClick={() => setSelectedModel("Qwen_Local")}
-                  >
-                    Qwen Local
-                  </button>
+                  {enabledModels.map((model) => (
+                    <button
+                      key={model.value}
+                      type="button"
+                      className={selectedModel === model.value ? "selected" : ""}
+                      onClick={() => setSelectedModel(model.value)}
+                    >
+                      {model.label}
+                    </button>
+                  ))}
                 </div>
+                {enabledModels.length === 0 && (
+                  <div className="validation-box" style={{ marginTop: "16px" }}>
+                    <b>AI-провайдер не настроен</b>
+                    <p>История и настройки доступны. Для нового анализа администратор должен включить модель.</p>
+                  </div>
+                )}
 
                 {showValidation && (
                   <div className="validation-box" id="upload-validation-box" style={{ marginTop: "20px" }}>
@@ -1227,6 +1227,7 @@ function App() {
                   id="start-analysis-btn"
                   style={{ marginTop: "20px", width: "100%" }}
                   onClick={startAnalysis}
+                  disabled={enabledModels.length === 0}
                 >
                   Запустить анализ
                 </button>
@@ -1312,7 +1313,7 @@ function App() {
         );
       }
 
-      if (report.status === "Processing") {
+      if (["Queued", "Retrying", "Processing"].includes(report.status)) {
         return (
           <section className="page active" id="report-detail" data-title="Детали отчёта">
             <div className="state-panel">
@@ -1385,6 +1386,15 @@ function App() {
                 </div>
               )}
               <h2 id="report-title-heading">{report.title}</h2>
+              {report.result?.quality_status === "degraded" && (
+                <div className="quality-notice" role="status">
+                  <b>Результат с ограничениями.</b>{" "}
+                  Числовые показатели проверены по исходным данным, но качественные пояснения требуют экспертного просмотра.
+                  {Array.isArray(report.result.limitations) && report.result.limitations.length > 0 && (
+                    <span> {report.result.limitations.join(" ")}</span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="export-actions">
               {isOfflineMode && (
@@ -1575,7 +1585,7 @@ function App() {
           reports={mockReports}
           onNewAnalysis={() => {
             resetUploadForm();
-            window.location.hash = "upload";
+            navigateTo("upload");
           }}
         />
       );
@@ -1694,7 +1704,7 @@ function App() {
         onArchiveReport={handleArchiveReport}
         onNewAnalysis={() => {
           resetUploadForm();
-          window.location.hash = "upload";
+          navigateTo("upload");
         }}
         token={token}
         user={user}

@@ -12,8 +12,8 @@ class StudentAnswer(BaseModel):
     user_answer: str
     # Флаг правильности от LMS (эталон для сравнения с оценкой ИИ)
     is_correct_by_lms: bool
-    # Время выполнения задания в секундах
-    time_spent_seconds: int
+    # Время выполнения задания в секундах; None, если LMS не экспортирует метрику.
+    time_spent_seconds: Optional[int] = None
 
 class StudentAttempt(BaseModel):
     # Обезличенный идентификатор студента

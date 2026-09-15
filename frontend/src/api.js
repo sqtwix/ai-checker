@@ -1,6 +1,18 @@
 ﻿export const isOfflineMode =
   String(import.meta.env.VITE_OFFLINE_MODE || "").toLowerCase() === "true";
 
+const MODEL_CATALOG = {
+  deepseek: { value: "DeepSeek", label: "DeepSeek" },
+  gigachat: { value: "GigaChat", label: "GigaChat" },
+  local_llm: { value: "local_llm", label: "Локальная модель" },
+  qwen_local: { value: "local_llm", label: "Локальная модель" },
+};
+
+export const enabledModels = String(import.meta.env.VITE_ENABLED_MODELS ?? "")
+  .split(",")
+  .map((model) => MODEL_CATALOG[model.trim().toLowerCase()])
+  .filter(Boolean);
+
 const OFFLINE_REPORTS_KEY = "educheck_offline_reports";
 const OFFLINE_TASKS_KEY = "educheck_offline_tasks";
 const OFFLINE_STUDENTS_DEMO_SEED_KEY = "educheck_offline_students_demo_seed_v1";
@@ -176,7 +188,7 @@ export async function request(endpoint, options = {}) {
     let errorMsg = "Произошла ошибка при выполнении запроса";
     try {
       const errData = await response.json();
-      errorMsg = errData.error || errData.message || errorMsg;
+      errorMsg = errData.error || errData.detail || errData.message || errorMsg;
     } catch {
       // JSON parsing failed, try plain text
       try {

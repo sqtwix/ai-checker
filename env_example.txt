@@ -1,20 +1,2 @@
-# НАСТРОЙКИ POSTGRESQL
-DB_HOST=
-
-# порт на котором будет работать БД
-DB_PORT=
-
-# имя БД
-DB_NAME=
-
-# пользователь Бд который будет работать с базой
-DB_USER=
-
-# пароль от пользователя БД
-DB_PASSWORD=
-
-# НАСТРОЙКИ JWT 
-JWT_SECRET=SUPER_SECRET_KEY_MUST_BE_VERY_LONG_MIN_32_CHARS_123456
-JWT_ISSUER=AiCheckerApiCore
-JWT_AUDIENCE=AiCheckerFrontend
-JWT_EXPIRY_MINUTES=60
+# Устаревшее имя файла оставлено для совместимости.
+# Актуальный полный шаблон конфигурации: .env.example

@@ -1,13 +1,14 @@
 ﻿from openai import OpenAI
 import json
 import logging
+import os
 
 # ========================= Agent Client =========================
 
 # AgentClient - class, that present an Agent.
 # AgnetClient class contains a basic constructor
 # and execute method that used to get data from
-# model API (DeepSeek, Sber GPT, Local Qwen via vLLM).
+# model API (DeepSeek, GigaChat, local OpenAI-compatible runtime).
 
 # ========================= General JSON-Format =========================
 # {
@@ -26,6 +27,14 @@ import logging
 # Настройка логгера для отслеживания работы агентов
 logger = logging.getLogger(__name__)
 
+
+class AgentTransportError(Exception):
+    pass
+
+
+class AgentSemanticError(Exception):
+    pass
+
 class AgentClient:
     def __init__(self, api_key: str, base_url: str, agent_model: str, specialization: str):
         # Проверяем обязательные параметры перед инициализацией
@@ -37,7 +46,9 @@ class AgentClient:
             self.model = agent_model
             self.specialization = specialization
             # OpenAI клиент работает для всех совместимых API (DeepSeek, GigaChat, vLLM)
-            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            # Durable retries belong to the PostgreSQL job queue. SDK retries
+            # would duplicate expensive inference without changing task state.
+            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, max_retries=0)
         except Exception as e:
             raise Exception("AgentClient Initialization Exception: agent initialization failed - " + str(e))
 
@@ -54,7 +65,14 @@ class AgentClient:
         logger.info("Agent [%s] starting with model %s", self.specialization, self.model)
 
         try:
-            # Отправка запроса к API нейросети
+            timeout_seconds = max(30, min(900, int(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "360"))))
+            configured_output_tokens = max(128, min(4096, int(os.getenv("AI_MAX_OUTPUT_TOKENS", "1000"))))
+            role_output_limits = {
+                "main-analyzer": 240,
+                "anomalies-analyzer": 300,
+                "statistics-summarizer": 350,
+            }
+            max_output_tokens = min(configured_output_tokens, role_output_limits.get(self.specialization, 600))
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -63,25 +81,39 @@ class AgentClient:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.3,
-                timeout=90
+                max_tokens=max_output_tokens,
+                timeout=timeout_seconds
             )
 
-            # Извлекаем содержимое ответа
-            raw_content = response.choices[0].message.content
+        except Exception as e:
+            logger.error("Agent [%s] transport failed: %s", self.specialization, str(e))
+            raise AgentTransportError("provider request failed") from e
 
-            # Валидация JSON: проверяем, что модель вернула корректный JSON
-            # Это критично, так как все модули ожидают JSON на вход
-            try:
-                json.loads(raw_content)
-            except json.JSONDecodeError as json_err:
-                raise Exception(
-                    "AgentClient JSON Validation Exception: model returned invalid JSON. "
-                    "Response: " + str(raw_content)[:200] + "... Error: " + str(json_err)
-                )
+        try:
+            raw_content = response.choices[0].message.content
+            normalized_content = self._normalize_json_object(raw_content)
+            parsed = json.loads(normalized_content)
+            if not isinstance(parsed, dict):
+                raise ValueError("top-level JSON value must be an object")
 
             logger.info("Agent [%s] completed successfully", self.specialization)
-            return raw_content
-
+            return normalized_content
         except Exception as e:
-            logger.error("Agent [%s] execution failed: %s", self.specialization, str(e))
-            raise Exception("AgentClient Execution Exception: prompt execution failed - " + str(e))
+            logger.warning("Agent [%s] returned unusable JSON: %s", self.specialization, str(e))
+            raise AgentSemanticError("model returned invalid structured content") from e
+
+    @staticmethod
+    def _normalize_json_object(content: str) -> str:
+        """Accept a JSON object or one JSON object wrapped in a Markdown fence."""
+        if not isinstance(content, str):
+            raise ValueError("model returned no text content")
+        stripped = content.strip()
+        if not stripped.startswith("```"):
+            return stripped
+        lines = stripped.splitlines()
+        if len(lines) < 3 or lines[-1].strip() != "```":
+            return stripped
+        language = lines[0].strip().lower()
+        if language not in {"```", "```json"}:
+            return stripped
+        return "\n".join(lines[1:-1]).strip()

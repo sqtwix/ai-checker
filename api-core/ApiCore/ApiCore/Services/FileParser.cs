@@ -6,23 +6,42 @@ namespace ApiCore.Services;
 
 public class FileParser
 {
-    public static List<List<string>> ReadExcelRows(string filePath)
+    public sealed record ExcelWorksheet(string Name, List<List<string>> Rows);
+
+    public static List<ExcelWorksheet> ReadExcelWorksheets(string filePath)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-        var rows = new List<List<string>>();
+        var worksheets = new List<ExcelWorksheet>();
         using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = ExcelReaderFactory.CreateReader(stream);
-        while (reader.Read())
+
+        do
         {
-            var row = new List<string>();
-            for (int i = 0; i < reader.FieldCount; i++)
+            var rows = new List<List<string>>();
+            while (reader.Read())
             {
-                var val = reader.GetValue(i);
-                row.Add(val?.ToString() ?? "");
+                var row = new List<string>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var val = reader.GetValue(i);
+                    row.Add(val?.ToString() ?? "");
+                }
+                rows.Add(row);
             }
-            rows.Add(row);
+
+            if (rows.Any(row => row.Any(value => !string.IsNullOrWhiteSpace(value))))
+            {
+                worksheets.Add(new ExcelWorksheet(reader.Name, rows));
+            }
         }
-        return rows;
+        while (reader.NextResult());
+
+        return worksheets;
+    }
+
+    public static List<List<string>> ReadExcelRows(string filePath)
+    {
+        return ReadExcelWorksheets(filePath).FirstOrDefault()?.Rows ?? new List<List<string>>();
     }
 
     public CourseBatchAnalysisRequest ParseToBatchRequest(string benchmarkPath, List<string> userResponsePaths)
@@ -35,43 +54,85 @@ public class FileParser
         };
 
         // 1. Сначала парсим общий эталонный файл в плоский словарь: "Текст Вопроса" -> "Правильный Ответ"
-        var referenceAnswersLookup = ParseBenchmarkFile(benchmarkPath);
+        var benchmark = ParseBenchmarkFile(benchmarkPath);
 
         // 2. Поочередно парсим каждый файл с ответами студентов по темам
         foreach (var userPath in userResponsePaths)
         {
-            var testPayload = ParseUserResponseFile(userPath, referenceAnswersLookup);
-            if (testPayload != null)
-            {
-                batchRequest.Tests.Add(testPayload);
-            }
+            batchRequest.Tests.AddRange(ParseUserResponseFile(userPath, benchmark));
+        }
+
+        var unmatched = batchRequest.Tests
+            .SelectMany(test => test.Questions
+                .Where(question => question.ReferenceAnswer == "Эталонный ответ не найден в мастер-файле")
+                .Select(question => $"'{question.QuestionText}' ({test.TestName})"))
+            .Take(10)
+            .ToList();
+        if (unmatched.Count > 0)
+        {
+            throw new InvalidDataException(
+                "Для части вопросов не найдены эталонные ответы: " + string.Join("; ", unmatched) +
+                ". Исправьте эталонный файл или выгрузку ответов.");
         }
 
         return batchRequest;
     }
 
-    private Dictionary<string, string> ParseBenchmarkFile(string filePath)
+    private sealed record BenchmarkQuestion(string QuestionText, string ReferenceAnswer);
+
+    private sealed class BenchmarkCatalog
     {
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, List<BenchmarkQuestion>> Sheets { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public string? Resolve(string? sheetName, string questionText, int occurrence)
+        {
+            IEnumerable<BenchmarkQuestion> candidates;
+            if (!string.IsNullOrWhiteSpace(sheetName) && Sheets.TryGetValue(sheetName, out var sheet))
+            {
+                candidates = sheet;
+            }
+            else if (Sheets.Count == 1)
+            {
+                candidates = Sheets.Values.Single();
+            }
+            else
+            {
+                candidates = Sheets.Values.SelectMany(items => items);
+            }
+
+            return candidates
+                .Where(item => item.QuestionText.Equals(questionText, StringComparison.OrdinalIgnoreCase))
+                .Skip(occurrence)
+                .Select(item => item.ReferenceAnswer)
+                .FirstOrDefault();
+        }
+    }
+
+    private BenchmarkCatalog ParseBenchmarkFile(string filePath)
+    {
+        var catalog = new BenchmarkCatalog();
         var ext = Path.GetExtension(filePath).ToLowerSuffix();
 
         if (ext == ".xlsx" || ext == ".xls")
         {
-            var rows = ReadExcelRows(filePath);
-            if (rows.Count < 3) return lookup;
-
-            var excelHeaders = rows[0];
-            var excelValues = rows[2];
-
-            for (int i = 0; i < excelHeaders.Count; i++)
+            foreach (var worksheet in ReadExcelWorksheets(filePath))
             {
-                if (i < excelValues.Count && !string.IsNullOrWhiteSpace(excelHeaders[i]))
+                if (worksheet.Rows.Count < 3) continue;
+                var questions = new List<BenchmarkQuestion>();
+                var excelHeaders = worksheet.Rows[0];
+                var excelValues = worksheet.Rows[2];
+
+                for (int i = 0; i < excelHeaders.Count; i++)
                 {
-                    string questionText = CleanText(excelHeaders[i]);
-                    lookup[questionText] = CleanText(excelValues[i]);
+                    if (i < excelValues.Count && !string.IsNullOrWhiteSpace(excelHeaders[i]))
+                    {
+                        questions.Add(new BenchmarkQuestion(CleanText(excelHeaders[i]), CleanText(excelValues[i])));
+                    }
                 }
+
+                catalog.Sheets[worksheet.Name] = questions;
             }
-            return lookup;
+            return catalog;
         }
 
         using var stream = File.OpenRead(filePath);
@@ -85,41 +146,46 @@ public class FileParser
         // Строка 3: Сами правильные ответы из эталона
         string? valuesLine = reader.ReadLine();
 
-        if (headerLine == null || valuesLine == null) return lookup;
+        if (headerLine == null || valuesLine == null) return catalog;
 
         char delimiter = headerLine.Contains(';') ? ';' : ',';
         var headers = ParseCsvLine(headerLine, delimiter);
         var values = ParseCsvLine(valuesLine, delimiter);
 
+        var csvQuestions = new List<BenchmarkQuestion>();
         for (int i = 0; i < headers.Count; i++)
         {
             if (i < values.Count && !string.IsNullOrWhiteSpace(headers[i]))
             {
-                // Очищаем заголовки от возможных артефактов и кавычек
-                string questionText = CleanText(headers[i]);
-                lookup[questionText] = CleanText(values[i]);
+                csvQuestions.Add(new BenchmarkQuestion(CleanText(headers[i]), CleanText(values[i])));
             }
         }
-
-        return lookup;
+        catalog.Sheets[string.Empty] = csvQuestions;
+        return catalog;
     }
 
-    private AiTestPayloadDto? ParseUserResponseFile(string filePath, Dictionary<string, string> referenceAnswersLookup)
+    private List<AiTestPayloadDto> ParseUserResponseFile(string filePath, BenchmarkCatalog benchmark)
     {
         var ext = Path.GetExtension(filePath).ToLowerSuffix();
-        List<List<string>> rows;
-
         if (ext == ".xlsx" || ext == ".xls")
         {
-            rows = ReadExcelRows(filePath);
+            var worksheets = ReadExcelWorksheets(filePath);
+            var includeSheetName = worksheets.Count > 1;
+            return worksheets
+                .SelectMany(worksheet => ParseUserResponseWorksheet(
+                    worksheet.Rows,
+                    benchmark,
+                    worksheet.Name,
+                    includeSheetName
+                        ? $"{ExtractTestName(Path.GetFileName(filePath))} — {worksheet.Name}"
+                        : ExtractTestName(Path.GetFileName(filePath))))
+                .ToList();
         }
-        else
-        {
-            rows = new List<List<string>>();
-            using var stream = File.OpenRead(filePath);
-            var encoding = GetEncoding(stream);
-            using var reader = new StreamReader(stream, encoding);
 
+        var rows = new List<List<string>>();
+        using (var stream = File.OpenRead(filePath))
+        using (var reader = new StreamReader(stream, GetEncoding(stream)))
+        {
             string? line;
             char delimiter = ',';
             bool isFirst = true;
@@ -135,20 +201,74 @@ public class FileParser
             }
         }
 
-        if (rows.Count < 2) return null;
+        return ParseUserResponseWorksheet(rows, benchmark, null, ExtractTestName(Path.GetFileName(filePath)));
+    }
+
+    private List<AiTestPayloadDto> ParseUserResponseWorksheet(
+        List<List<string>> rows,
+        BenchmarkCatalog benchmark,
+        string? sheetName,
+        string testName)
+    {
+        var headerIndices = rows
+            .Select((row, index) => new { row, index })
+            .Where(item => IsUserHeaderRow(item.row))
+            .Select(item => item.index)
+            .ToList();
+        if (headerIndices.Count == 0 && rows.Count >= 2)
+        {
+            headerIndices.Add(0);
+        }
+
+        var payloads = new List<AiTestPayloadDto>();
+        for (var sectionIndex = 0; sectionIndex < headerIndices.Count; sectionIndex++)
+        {
+            var start = headerIndices[sectionIndex];
+            var end = sectionIndex + 1 < headerIndices.Count ? headerIndices[sectionIndex + 1] : rows.Count;
+            var sectionRows = rows.GetRange(start, end - start);
+            var sectionName = headerIndices.Count > 1 ? $"{testName} — блок {sectionIndex + 1}" : testName;
+            var payload = ParseUserResponseSection(sectionRows, benchmark, sheetName, sectionName);
+            if (payload != null)
+            {
+                payloads.Add(payload);
+            }
+        }
+        return payloads;
+    }
+
+    private static bool IsUserHeaderRow(List<string> row)
+    {
+        if (row.Count < 4) return false;
+        var first = row[0].Trim();
+        if (!first.Equals("Пользователь", StringComparison.OrdinalIgnoreCase) &&
+            !first.Equals("Код", StringComparison.OrdinalIgnoreCase)) return false;
+        return row[1].Contains("Дата", StringComparison.OrdinalIgnoreCase)
+            && row[2].Contains("Статус", StringComparison.OrdinalIgnoreCase)
+            && (row[3].Contains("Балл", StringComparison.OrdinalIgnoreCase)
+                || row[3].Contains("Оцен", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private AiTestPayloadDto? ParseUserResponseSection(
+        List<List<string>> rows,
+        BenchmarkCatalog benchmark,
+        string? sheetName,
+        string testName)
+    {
+        if (rows.Count < 3) return null;
 
         var headers = rows[0];
         var subHeaders = rows[1];
 
         var testPayload = new AiTestPayloadDto
         {
-            TestName = ExtractTestName(Path.GetFileName(filePath))
+            TestName = testName
         };
 
         // Шаг A. Картируем структуру колонок вопросов.
         // Первые 4 колонки (0,1,2,3) — это Пользователь, Дата, Статус, Баллы. 
         // Начиная с 4-й идут блоки вопросов с шагом в 4 колонки.
         var questionColumnsIndices = new List<(string QuestionId, string QuestionText, int StartIdx)>();
+        var questionOccurrences = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int questionCounter = 1;
 
         for (int i = 4; i < headers.Count; i += 4)
@@ -162,9 +282,10 @@ public class FileParser
             string questionId = $"q_{testPayload.TestName.Replace(" ", "_")}_{questionCounter++}";
 
             // Ищем правильный ответ в словаре эталона. Если его там нет, подстрахуемся дефолтным
-            string refAnswer = referenceAnswersLookup.TryGetValue(questionText, out var ans)
-                ? ans
-                : "Эталонный ответ не найден в мастер-файле";
+            questionOccurrences.TryGetValue(questionText, out var occurrence);
+            questionOccurrences[questionText] = occurrence + 1;
+            string refAnswer = benchmark.Resolve(sheetName, questionText, occurrence)
+                ?? "Эталонный ответ не найден в мастер-файле";
 
             testPayload.Questions.Add(new AiQuestionDto
             {
@@ -185,7 +306,7 @@ public class FileParser
 
             // Пропускаем технические или пустые строки, если ID пользователя не числовой
             string studentId = fields[0];
-            if (string.IsNullOrWhiteSpace(studentId) || studentId.Contains("Пользователь")) continue;
+            if (string.IsNullOrWhiteSpace(studentId) || IsUserHeaderRow(fields)) continue;
 
             var attempt = new StudentAttemptDto
             {
@@ -211,17 +332,14 @@ public class FileParser
                     // Код lcnwu5wcgk означает верный ответ, r1s987zw3e — неверный
                     bool isCorrectByLms = fields[baseIdx + 1].Equals("lcnwu5wcgk", StringComparison.OrdinalIgnoreCase);
 
-                    // Так как в выгрузках ЛМС нет тайминга на каждый вопрос, а ТЗ строго требует "анализ временных метрик",
-                    // мы симулируем реалистичное время прохождения (от 35 до 160 секунд) на базе хэша студента, 
-                    // чтобы ИИ-агенты могли отрабатывать аномалии (SpeedCheating).
-                    int simulatedTime = new Random(studentId.GetHashCode() + baseIdx).Next(35, 160);
-
                     attempt.Answers.Add(new AiUserAnswerDto
                     {
                         QuestionId = qMap.QuestionId,
                         UserAnswer = CleanText(fields[baseIdx + 2]),
                         IsCorrectByLms = isCorrectByLms,
-                        TimeSpentSeconds = simulatedTime
+                        // Выгрузка LMS не содержит время по вопросу. Отсутствующие
+                        // данные нельзя подменять синтетикой: это создает ложные аномалии.
+                        TimeSpentSeconds = null
                     });
                 }
             }

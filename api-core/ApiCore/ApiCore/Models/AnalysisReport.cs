@@ -24,7 +24,7 @@ public class AnalysisReport
 
     [Required]
     [Column("status")]
-    public string Status { get; set; } = string.Empty; // Processing, Completed, Failed
+    public string Status { get; set; } = string.Empty; // Queued, Processing, Retrying, Completed, Failed
 
     [Column("result_json", TypeName = "jsonb")]
     public string? ResultJson { get; set; }
@@ -34,4 +34,23 @@ public class AnalysisReport
 
     [Column("is_archived")]
     public bool IsArchived { get; set; } = false;
+
+    [Column("payload_json", TypeName = "jsonb")]
+    public string? PayloadJson { get; set; }
+
+    [Column("model_type")]
+    [MaxLength(30)]
+    public string? ModelType { get; set; }
+
+    [Column("attempt_count")]
+    public int AttemptCount { get; set; }
+
+    [Column("next_retry_at")]
+    public DateTime? NextRetryAt { get; set; }
+
+    [Column("started_at")]
+    public DateTime? StartedAt { get; set; }
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

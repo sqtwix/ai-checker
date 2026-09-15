@@ -21,6 +21,15 @@ public class CourseBatchAnalysisResult
 
     [JsonPropertyName("course_recommendations")]
     public List<AiRecommendationDto> CourseRecommendations { get; set; } = new();
+
+    [JsonPropertyName("generation_mode")]
+    public string GenerationMode { get; set; } = "llm";
+
+    [JsonPropertyName("quality_status")]
+    public string QualityStatus { get; set; } = "verified";
+
+    [JsonPropertyName("limitations")]
+    public List<string> Limitations { get; set; } = new();
 }
 
 public class TestSummaryDto

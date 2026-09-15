@@ -1,5 +1,5 @@
 ﻿from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Literal
 
 # ========================= Analysis Response Schemas =========================
 
@@ -20,7 +20,7 @@ class TestSummary(BaseModel):
     # Название теста
     test_name: str
     # Массовые ошибки по вопросам
-    critical_mass_errors: List[CriticalMassError] = []
+    critical_mass_errors: List[CriticalMassError] = Field(default_factory=list)
 
 class StudentDetailedAnalysis(BaseModel):
     # ID студента
@@ -60,10 +60,13 @@ class AnalysisResponse(BaseModel):
     # Общий вывод по курсу
     global_course_summary: str
     # Сводки по тестам
-    test_summaries: List[TestSummary] = []
+    test_summaries: List[TestSummary] = Field(default_factory=list)
     # Детальный анализ по студентам
-    student_detailed_analyses: List[StudentDetailedAnalysis] = []
+    student_detailed_analyses: List[StudentDetailedAnalysis] = Field(default_factory=list)
     # Аномалии
-    anomalies: List[Anomaly] = []
+    anomalies: List[Anomaly] = Field(default_factory=list)
     # Рекомендации
-    course_recommendations: List[CourseRecommendation] = []
+    course_recommendations: List[CourseRecommendation] = Field(default_factory=list)
+    generation_mode: Literal["llm", "fallback"] = "llm"
+    quality_status: Literal["verified", "degraded", "failed"] = "verified"
+    limitations: List[str] = Field(default_factory=list)

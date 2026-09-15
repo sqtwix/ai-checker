@@ -2,7 +2,7 @@
 set -e
 
 # Проверяем наличие модели
-MODEL_PATH=${MODEL_PATH:-/models/qwen3-8b.Q4_K_M.gguf}
+MODEL_PATH=${MODEL_PATH:-/models/model.gguf}
 
 if [ ! -f "$MODEL_PATH" ]; then
     echo "ERROR: Model file not found at $MODEL_PATH"
@@ -23,6 +23,7 @@ exec /app/llama-server \
     --port "${SERVER_PORT:-8080}" \
     --ctx-size "${N_CTX:-8192}" \
     --n-gpu-layers "${N_GPU_LAYERS:-0}" \
-    --threads "${N_THREADS:-4}" \
+    --threads "${N_THREADS:-8}" \
     --batch-size "${BATCH_SIZE:-512}" \
+    --parallel "${PARALLEL:-1}" \
     --alias "${MODEL_ALIAS:-local-model}"

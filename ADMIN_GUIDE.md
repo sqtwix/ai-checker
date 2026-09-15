@@ -1,99 +1,196 @@
-# Руководство администратора — НейроЭксперт
+# Руководство администратора
 
-Данное руководство содержит информацию по установке, конфигурированию ИИ-провайдеров, администрированию баз данных и оптимизации локального сервера инференса.
+## 1. Подготовка
 
----
+Минимум: Docker Engine и Docker Compose v2/standalone Compose. Для локальной
+модели заранее оцените RAM/VRAM по требованиям конкретного GGUF-файла.
 
-## 1. Системные требования и Сетевая структура
-
-Система разворачивается в изолированной Docker-сети `saas-network`. 
-
-### Сетевая конфигурация портов (Host -> Container):
-* **3000 -> 80** — frontend (Nginx раздает статическую сборку React).
-* **5000 -> 8080** — api-core (ядро .NET Core Web API).
-* **5432 -> 5432** — postgres (СУБД PostgreSQL).
-* **6379 -> 6379** — redis (Брокер очередей и кэш).
-* **8000 -> 8000** — ai-driver (Python FastAPI сервис агентов).
-* **8001 -> 8080** — qwen-local (llama.cpp сервер).
-
----
-
-## 2. Настройка переменных окружения
-
-Конфигурация системы осуществляется через файл `.env` (пример env находиться в env_example.txt) в корне проекта или через секцию `environment` в `docker-compose.yml`.
-
-### А. Настройки Базы Данных и Redis (api-core):
-* `ConnectionStrings__DefaultConnection` — строка подключения к PostgreSQL. По умолчанию:
-  `Host=postgres;Port=5432;Database=aichecker;Username=postgres;Password=postgres`
-* `Redis__ConnectionString` — адрес Redis хоста. По умолчанию: `redis:6379`
-* `JwtSettings__Secret` — секретный ключ для генерации JWT токенов (необходимо сменить в продакшене!).
-* `JwtSettings__Issuer`, `JwtSettings__Audience` — параметры валидации токенов.
-
-### Б. Настройки ИИ-провайдеров (ai-driver):
-Для подключения внешних (облачных) моделей укажите ключи в соответствующих переменных:
-
-#### 1. DeepSeek:
-* `DEEPSEEK_API_KEY` — ваш API ключ от платформы DeepSeek.
-* `DEEPSEEK_BASE_URL` — базовый адрес API (по умолчанию `https://api.deepseek.com`).
-* `DEEPSEEK_MODEL` — используемая модель (по умолчанию `deepseek-chat`).
-
-#### 2. Sber GigaChat (SberGPT):
-* `SBERGPT_API_KEY` — API-ключ/авторизационный токен GigaChat.
-* `SBERGPT_BASE_URL` — адрес API (по умолчанию `https://gigachat.devices.sberbank.ru/api/v1/`).
-* `SBERGPT_MODEL` — используемая модель (по умолчанию `GigaChat-Pro`).
-
----
-
-## 3. Администрирование локального сервера инференса (llama.cpp)
-
-Локальная модель запускается в контейнере `qwen-local` на базе llama.cpp.
-
-### Шаги для смены или добавления модели:
-1. Скачайте модель в формате `.gguf` (рекомендуется `Qwen/Qwen3.5-0.8B-Instruct-GGUF` или `Qwen/Qwen3.5-3B-Instruct-GGUF` для баланса скорости и качества).
-```shell
-curl -LO https://huggingface.co/mozilla-ai/llamafile_0.10/resolve/main/Qwen3.5-0.8B-Q8_0.llamafile
-
-# Make it executable (macOS/Linux/BSD)
-chmod +x Qwen3.5-0.8B-Q8_0.llamafile
-```
-2. Поместите файл в папку `models/` в корне проекта.
-3. Создайте переменные среды: скопируйте содержимое __env_example.txt__ (там уже есть перемнные для JWT) и создайте __.env файл__, добавив значения перемнных БД.
-4. В файле `docker-compose.yml` в секции сервиса `qwen-local` обновите переменную окружения `MODEL_PATH`:
-   ```yaml
-   environment:
-     - MODEL_PATH=/models/ИМЯ_ВАШЕГО_ФАЙЛА.gguf
-   ```
-5. Перезапустите контейнер: `docker compose up -d qwen-local`
-
-### Настройка производительности на CPU:
-В `docker-compose.yml` для сервиса `qwen-local` можно настроить следующие переменные:
-* `N_THREADS` — количество физических ядер CPU, выделяемых для расчетов (рекомендуется выставлять равным числу физических ядер процессора хоста минус 1-2).
-* `N_CTX` — размер контекстного окна в токенах (по умолчанию `8192`). Не рекомендуется занижать менее `4096`, так как JSON-данные тестов могут быть объемными.
-* `BATCH_SIZE` — размер пакета для вычисления промпта (по умолчанию `512`).
-
----
-
-## 4. Резервное копирование и Персистентность данных
-
-Данные PostgreSQL сохраняются на хост-системе через Docker Volume `db-data`, который монтируется в `/var/lib/postgresql/data` контейнера `postgres`.
-
-### Создание резервной копии базы данных (Дамп):
-Выполните команду на хост-системе для создания SQL-дампа:
 ```bash
-docker exec -t aichecker-postgres pg_dumpall -U postgres > backup_db.sql
+./scripts/init_env.sh
 ```
 
-### Восстановление базы данных из дампа:
+Перед первым запуском:
+
+1. Скрипт сам генерирует уникальные `DB_PASSWORD` и `JWT_SECRET` и выставляет
+   права `.env` `600`; существующие значения не заменяются.
+2. Задайте ключи облачных провайдеров, которые реально будут использоваться.
+3. Укажите только настроенные модели в `ENABLED_MODELS`, например
+   `deepseek,gigachat,local_llm`.
+4. Не включайте `ALLOW_PROGRAMMATIC_FALLBACK` без бизнес-решения: такой отчёт
+   является простым расчётом, а не результатом ИИ, и явно маркируется в UI.
+
+`.env` запрещён к коммиту. Не используйте значения-заглушки из `.env.example`
+в production.
+
+Если `.env` случайно удалён, но API-контейнер остался, initializer восстанавливает
+DB/JWT credentials из его environment вместо генерации несовместимых новых
+значений. Это аварийная страховка, а не замена secret manager и backup.
+
+## 2. Запуск
+
+Единственная рекомендуемая production-точка входа:
+
 ```bash
-cat backup_db.sql | docker exec -i aichecker-postgres psql -U postgres
+./deploy.sh
+# Windows: deploy.bat
 ```
 
----
+Скрипт валидирует env и Compose до сборки, ждёт health всех сервисов, выполняет
+model inference probe для local LLM и общий HTTP smoke. Прямой `docker compose
+up` оставлен для диагностики и разработки.
+Smoke использует только зарезервированные адреса `smoke-*@example.test` и удаляет
+технического пользователя вместе с его данными сразу после проверки.
 
-## 5. Мониторинг работоспособности (Healthchecks)
+Холодная загрузка managed GGUF с host-mounted каталога может занимать несколько
+минут. Deployment ждёт её до 15 минут и только затем запускает inference probe.
+Для медленных CPU значения `AI_PROVIDER_TIMEOUT_SECONDS`,
+`AI_PIPELINE_TIMEOUT_SECONDS`, `AI_MAX_INPUT_CHARS` и `AI_MAX_OUTPUT_TOKENS`
+задают бюджет одного AI-вызова, всей цепочки, входного контекста и ответа.
+Проверенный CPU baseline ограничивает AI-контекст 4000 символами и использует
+role-specific output limits; полные числовые показатели всегда рассчитываются
+сервером по всему исходному набору. Внутренние retries SDK отключены: сетевые
+сбои повторяет только наблюдаемая durable queue PostgreSQL, а невалидный JSON
+отдельной AI-роли даёт безопасный `degraded`-результат без повторного inference.
+`LOCAL_LLM_THREADS=8` — проверенный baseline для Qwen2.5-Coder-3B на данном
+8-core host; на сервере заказчика значение следует подобрать по CPU benchmark.
 
-Контейнеры снабжены встроенными проверками здоровья:
-* **postgres**: проверяет готовность принимать соединения через `pg_isready`.
-* **qwen-local**: опрашивает локальный эндпоинт `/health` сервера llama.cpp.
-* Сервис `ai-driver` запускается только после успешного прохождения проверки здоровья `qwen-local` и `redis` (задано через `depends_on -> condition: service_healthy`).
-* В случае зависания локального сервера инференса, Docker автоматически перезапустит контейнер благодаря политике `restart: unless-stopped`.
+Managed GGUF:
+
+1. Поместите совместимый instruct/chat GGUF для llama.cpp в `./models` либо
+   укажите его каталог в `LOCAL_LLM_MODELS_DIR` (абсолютный путь допустим).
+2. Укажите `LOCAL_LLM_MODEL_FILE`, обязательный `LOCAL_LLM_MODEL_SHA256`,
+   `ENABLE_LOCAL_LLM=true`, `LOCAL_LLM_MODE=managed` и добавьте `local_llm` в
+   `ENABLED_MODELS`.
+3. Можно вместо ручного копирования указать HTTPS `LOCAL_LLM_MODEL_URL`:
+   загрузка идёт через `.part`, проверяется SHA-256 и только затем публикуется.
+4. Запустите `./deploy.sh`.
+
+Каталог монтируется в контейнер только для чтения; GGUF не нужно и не следует
+копировать в Git-репозиторий. Пример для отдельного каталога моделей:
+
+```env
+LOCAL_LLM_MODELS_DIR=/opt/ai-checker/models
+LOCAL_LLM_MODEL_FILE=model.gguf
+LOCAL_LLM_MODEL_SHA256=<64 hex characters>
+```
+
+Поддерживается любой instruct/chat GGUF, совместимый с закреплённым llama.cpp;
+совместимость со всеми моделями не обещается.
+
+External OpenAI-compatible endpoint:
+
+```env
+ENABLE_LOCAL_LLM=true
+LOCAL_LLM_MODE=external
+LOCAL_LLM_BASE_URL=http://host.docker.internal:1234/v1
+LOCAL_LLM_MODEL=my-chat-model
+LOCAL_LLM_API_KEY=
+ENABLED_MODELS=local_llm
+```
+
+В контейнере `localhost` означает AI Driver, поэтому для runtime на Docker host
+используйте `host.docker.internal`. Endpoint обязан поддерживать `/v1/models` и
+`/v1/chat/completions`.
+
+Demo UI без backend:
+
+```bash
+./scripts/compose.sh -f docker-compose.offline.yml --env-file .env up --build -d
+```
+
+## 3. Сеть и healthchecks
+
+| Сервис | Host → container | Публичность по умолчанию |
+| --- | --- | --- |
+| frontend | `3000 → 80` | все интерфейсы |
+| api-core | `127.0.0.1:5000 → 5000` | только host |
+| ai-driver | `127.0.0.1:8000 → 8000` | только host |
+| PostgreSQL | `5432` | только внутренняя Docker-сеть |
+| local-llm | `8080` | только внутренняя Docker-сеть, профиль `local-ai` |
+
+Проверка:
+
+```bash
+curl -fsS http://localhost:3000/health
+curl -fsS http://127.0.0.1:5000/health/ready
+curl -fsS http://127.0.0.1:8000/health
+./scripts/compose.sh --env-file .env ps
+```
+
+`healthy` AI-driver означает готовность HTTP-сервиса, но не проверяет внешний
+аккаунт/баланс облачного провайдера. Local LLM дополнительно проходит реальный
+chat inference при каждом штатном deploy. Облачный provider перед релизом
+проверяется тестовым анализом.
+
+## 4. Защита и ограничения
+
+- frontend добавляет базовые security headers и ограничивает запрос 100 МБ;
+- API ограничивает каждый файл 50 МБ, до 50 response-файлов и очередь до 20 задач;
+- ZIP ограничен 200 файлами и 200 МБ распакованных данных;
+- загружаемые имена не используются как пути;
+- внутренние ошибки провайдера не возвращаются пользователю;
+- идентификаторы студентов псевдонимизируются перед отправкой модели и
+  восстанавливаются в сохранённом результате;
+- API и AI Driver работают non-root с read-only root filesystem;
+- Docker logs ограничены ротацией `10 МБ × 5`;
+- Swagger API включён только в Development.
+
+Изменить лимиты можно через `MAX_*` и `ANALYSIS_QUEUE_CAPACITY` в `.env`.
+TLS завершается внешним reverse proxy/load balancer. Сохраняйте его конфигурацию
+и сертификаты вне репозитория.
+
+## 5. Обновление и rollback
+
+```bash
+git pull
+./scripts/backup_restore_smoke.sh
+./deploy.sh
+```
+
+До обновления сделайте backup. Для rollback checkout проверенного тега и
+пересоберите образы; volume PostgreSQL не удаляйте.
+
+## 6. Backup PostgreSQL
+
+```bash
+./scripts/compose.sh --env-file .env exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' > backup-$(date +%F).sql
+```
+
+Восстановление в пустую/подготовленную БД:
+
+```bash
+./scripts/compose.sh --env-file .env exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backup-2026-01-01.sql
+```
+
+Проверка реального dump/restore в изолированную временную БД:
+
+```bash
+./scripts/backup_restore_smoke.sh
+```
+
+Production backup должен быть зашифрован, храниться off-host, иметь retention и
+мониторинг. Репозиторий намеренно не угадывает выбранное заказчиком хранилище.
+
+## 7. Очередь и восстановление
+
+Очередь хранится в PostgreSQL. Payload и загруженные файлы находятся в БД и
+persistent volume `analysis-jobs`; worker берёт задачи через `FOR UPDATE SKIP
+LOCKED`. После аварийного рестарта `Processing` переходит в `Retrying`, а
+обработка продолжается. Временные ошибки provider повторяются до
+`ANALYSIS_MAX_ATTEMPTS`, после чего задача получает terminal `Failed`, payload и
+файлы удаляются. UI не рисует выдуманный прогресс, а отображает серверные
+`Queued`/`Retrying`/`Processing`.
+
+Схема управляется EF Core migration `ProductionBaseline`, которая также безопасно
+принимает legacy БД ранних версий. Перед rollback проверяйте обратную
+совместимость схемы и никогда не выполняйте `down -v` на production.
+
+## 8. Наблюдаемость и perimeter
+
+API выдаёт/валидирует `X-Correlation-ID`, прокидывает его в AI Driver и пишет
+status/elapsed time в структурированные логи. Встроенных Prometheus,
+OpenTelemetry и alert manager пока нет: на сервере заказчика необходимо
+настроить сбор Docker logs и алерты health, disk и backup. Публичный frontend
+нужно размещать за TLS reverse proxy/WAF; Compose сам публикует HTTP.

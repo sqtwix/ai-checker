@@ -1,129 +1,155 @@
+name: ai-checker
+
 services:
   api-core:
     build:
       context: ./api-core/ApiCore/ApiCore
+    restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "127.0.0.1:${API_PORT:-5000}:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
-      - ConnectionStrings__Redis=redis:6379
-      - JwtSettings__Secret=${JWT_SECRET}
-      - JwtSettings__Issuer=${JWT_ISSUER}
-      - JwtSettings__Audience=${JWT_AUDIENCE}
-      - JwtSettings__ExpiryMinutes=${JWT_EXPIRY_MINUTES}
-      - AiDriver__Url=http://ai-driver:8000
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${DB_NAME:?Set DB_NAME in .env};Username=${DB_USER:?Set DB_USER in .env};Password=${DB_PASSWORD:?Set DB_PASSWORD in .env}"
+      JwtSettings__Secret: "${JWT_SECRET:?Set JWT_SECRET in .env}"
+      JwtSettings__Issuer: "${JWT_ISSUER:-AiCheckerApiCore}"
+      JwtSettings__Audience: "${JWT_AUDIENCE:-AiCheckerFrontend}"
+      JwtSettings__ExpiryMinutes: "${JWT_EXPIRY_MINUTES:-60}"
+      AiDriver__Url: http://ai-driver:8000
+      Uploads__MaxRequestSizeMb: "${MAX_REQUEST_SIZE_MB:-100}"
+      Uploads__MaxFileSizeMb: "${MAX_FILE_SIZE_MB:-50}"
+      Uploads__MaxResponseFileCount: "${MAX_RESPONSE_FILE_COUNT:-50}"
+      AnalysisQueue__Capacity: "${ANALYSIS_QUEUE_CAPACITY:-20}"
+      AnalysisQueue__MaxAttempts: "${ANALYSIS_MAX_ATTEMPTS:-3}"
+      AnalysisQueue__JobsDirectory: /var/lib/ai-checker/jobs
+      AnalysisQueue__PipelineTimeoutSeconds: "${AI_PIPELINE_TIMEOUT_SECONDS:-1200}"
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - saas-network
+      ai-driver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - analysis-jobs:/var/lib/ai-checker/jobs
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [app-network]
 
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_OFFLINE_MODE: ${VITE_OFFLINE_MODE:-false}
+        VITE_OFFLINE_MODE: "false"
+        VITE_ENABLED_MODELS: "${ENABLED_MODELS:-}"
+    restart: unless-stopped
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
-      - api-core
-    networks:
-      - saas-network
+      api-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [app-network]
 
   postgres:
-    image: postgres:15-alpine
-    container_name: aichecker-postgres
+    image: postgres:15-alpine@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: "${DB_NAME:?Set DB_NAME in .env}"
+      POSTGRES_USER: "${DB_USER:?Set DB_USER in .env}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 3s  # Проверять каждые 3 секунды
-      timeout: 3s   # Таймаут на ответ
-      retries: 10   # Сколько раз пытаться до того, как признать контейнер упавшим
-    networks:
-      - saas-network
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [app-network]
 
   ai-driver:
     build:
       context: ./ai-driver
-    ports:
-      - "8000:8000"
-    environment:
-      # DeepSeek конфигурация
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
-      # SberGPT конфигурация
-      - SBERGPT_API_KEY=${SBERGPT_API_KEY}
-      - SBERGPT_BASE_URL=${SBERGPT_BASE_URL:-https://gigachat.devices.sberbank.ru/api/v1/}
-      - SBERGPT_MODEL=${SBERGPT_MODEL:-GigaChat-Pro}
-      # Локальная Qwen модель (llama.cpp)
-      - QWEN_LOCAL_URL=http://qwen-local:8080/v1
-      - QWEN_LOCAL_MODEL=${QWEN_LOCAL_MODEL:-local-model}
-    depends_on:
-      qwen-local:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    networks:
-      - saas-network
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${AI_DRIVER_PORT:-8000}:8000"
+    environment:
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
+      SBERGPT_API_KEY: "${SBERGPT_API_KEY:-}"
+      SBERGPT_BASE_URL: "${SBERGPT_BASE_URL:-https://gigachat.devices.sberbank.ru/api/v1/}"
+      SBERGPT_MODEL: "${SBERGPT_MODEL:-GigaChat-Pro}"
+      ENABLE_LOCAL_LLM: "${ENABLE_LOCAL_LLM:-false}"
+      LOCAL_LLM_MODE: "${LOCAL_LLM_MODE:-managed}"
+      LOCAL_LLM_BASE_URL: "${LOCAL_LLM_BASE_URL:-http://local-llm:8080/v1}"
+      LOCAL_LLM_MODEL: "${LOCAL_LLM_MODEL:-local-model}"
+      LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
+      AI_PROVIDER_TIMEOUT_SECONDS: "${AI_PROVIDER_TIMEOUT_SECONDS:-360}"
+      AI_MAX_OUTPUT_TOKENS: "${AI_MAX_OUTPUT_TOKENS:-1000}"
+      AI_MAX_INPUT_CHARS: "${AI_MAX_INPUT_CHARS:-4000}"
+      ALLOW_PROGRAMMATIC_FALLBACK: "${ALLOW_PROGRAMMATIC_FALLBACK:-false}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [app-network]
 
-  # Сервис с локальной моделью через llama.cpp
-  qwen-local:
+  local-llm:
+    profiles: [local-ai]
     build:
       context: ./llama-cpp
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8080"
+    restart: unless-stopped
     volumes:
-      - ./models:/models:ro
+      - "${LOCAL_LLM_MODELS_DIR:-./models}:/models:ro"
     environment:
-      - MODEL_PATH=/models/Qwen3.5-0.8B-Q8_0.gguf
-      - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8080
-      - N_CTX=8192
-      - N_GPU_LAYERS=0
-      - N_THREADS=4
-      - BATCH_SIZE=512
-      - MODEL_ALIAS=local-model
-    # НАСТРОЙКА HEALTHCHECK (чтобы ai-driver не стучался в не прогретую модель)
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s # Даем модели время загрузиться в оперативную память при старте
-    networks:
-      - saas-network
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - saas-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      MODEL_PATH: "/models/${LOCAL_LLM_MODEL_FILE:-model.gguf}"
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      N_CTX: "${LOCAL_LLM_CONTEXT_SIZE:-8192}"
+      N_GPU_LAYERS: "${LOCAL_LLM_GPU_LAYERS:-0}"
+      N_THREADS: "${LOCAL_LLM_THREADS:-8}"
+      BATCH_SIZE: "${LOCAL_LLM_BATCH_SIZE:-512}"
+      PARALLEL: "${LOCAL_LLM_PARALLEL:-1}"
+      MODEL_ALIAS: "${LOCAL_LLM_MODEL:-local-model}"
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [app-network]
 
 volumes:
-  redis-data:
-  postgres_data:
+  postgres-data:
+  analysis-jobs:
 
 networks:
-  saas-network:
+  app-network:
     driver: bridge

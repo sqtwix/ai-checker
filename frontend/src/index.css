@@ -1454,6 +1454,17 @@ p {
   margin-top: 20px;
 }
 
+.quality-notice {
+  max-width: 880px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--warning-soft);
+  line-height: 1.5;
+}
+
 .progress-track {
   height: 12px;
   margin: 20px 0 28px;
@@ -2561,6 +2572,12 @@ body[data-density="minimal"] .state-panel {
 
 .editor-wide {
   grid-column: 1 / -1;
+}
+
+@media (max-width: 980px) {
+  body[data-density="minimal"] .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {
