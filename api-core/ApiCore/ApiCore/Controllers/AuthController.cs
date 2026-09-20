@@ -20,8 +20,14 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
+    [RequestSizeLimit(16_384)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
+        if (request.Username.Trim().Length < 2)
+        {
+            return BadRequest(new { error = "Имя должно содержать не менее 2 символов без учёта пробелов." });
+        }
+
         var result = await _authService.RegisterAsync(request);
         if (result == null)
         {
@@ -34,6 +40,7 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting("auth")]
+    [RequestSizeLimit(16_384)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         var result = await _authService.LoginAsync(request);

@@ -56,6 +56,7 @@ fi
   .venv/bin/python -m unittest discover -s tests -v
   .venv/bin/pip check
 )
+python3 -m py_compile scripts/*.py
 
 echo "[5/7] Lint and build frontend"
 if command -v npm >/dev/null 2>&1; then

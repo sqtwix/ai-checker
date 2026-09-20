@@ -47,12 +47,11 @@ Demo-режим предназначен для показа интерфейс�
 ## Адреса production Compose
 
 - frontend: `http://localhost:3000`;
-- api-core: `http://127.0.0.1:5000`;
-- AI-driver docs: `http://127.0.0.1:8000/docs`;
-- health: `/health` у frontend/AI-driver и `/health/live`, `/health/ready` у API.
+- публичный API: `http://localhost:3000/api/v1` через frontend proxy;
+- health frontend: `http://localhost:3000/health`.
 
-API и AI-driver привязаны только к loopback, PostgreSQL доступен только внутри
-Docker-сети. Для внешнего business-
+API, AI-driver, PostgreSQL и managed model доступны только внутри Docker-сети.
+В dev override API и AI-driver публикуются на loopback. Для внешнего business-
 доступа публикуйте frontend через внешний HTTPS reverse proxy.
 
 ## Проверка перед релизом
@@ -82,8 +81,10 @@ python3 scripts/analysis_e2e.py \
 - [ADMIN_GUIDE.md](ADMIN_GUIDE.md) — production deployment и эксплуатация;
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — локальная разработка и тесты.
 - [RELEASE_GATE.md](RELEASE_GATE.md) — обязательный production release gate.
+- [CUSTOMER_ACCEPTANCE_HANDOFF_RU.md](CUSTOMER_ACCEPTANCE_HANDOFF_RU.md) —
+  независимая приёмка 20.09.2026, сценарий презентации и handoff заказчику.
 - [PRODUCTION_HARDENING_AUDIT.md](PRODUCTION_HARDENING_AUDIT.md) — что реально
-  проверено и какие внешние gates ещё требуют инфраструктуры заказчика.
+  проверялось в историческом hardening-прогоне 15.09.2026.
 
 Авторы: Шульга Иван, Прокудин Александр, Валавеа Ирина, Бондарев Максим.
 Контакт: `ivan20140767@gmail.com`.

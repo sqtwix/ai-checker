@@ -39,15 +39,17 @@ registry и secret store должны быть утверждены владел
 их выбора отдельный gated deploy job должен использовать те же release images и
 не собирать код повторно на сервере.
 
-## Фактический acceptance-прогон 15 сентября 2026
+## Независимый acceptance-прогон 20 сентября 2026
 
-Локально подтверждены `make verify`, канонический `deploy.sh`, managed GGUF
-inference, полный frontend E2E, ACL, restart/retry/terminal failure durable
-queue, backup/restore, четыре формата экспорта и desktop/mobile UI. Точная
-матрица и найденные исправления записаны в `PRODUCTION_HARDENING_AUDIT.md`.
+С нуля подтверждены `make verify`, clean no-AI production deploy, внешний
+OpenAI-compatible transport/contract, CSV/XLSX/ZIP, ACL, restart/retry/terminal
+failure, atomic backpressure, malformed JSON fail-safe, backup/restore, четыре
+формата экспорта и desktop/mobile UI. Точная матрица, цифры, исправления и
+сценарий передачи заказчику находятся в `CUSTOMER_ACCEPTANCE_HANDOFF_RU.md`.
 
-Открыты только внешние release gates: hosted CI на финальном commit, immutable
-registry tag/digest, Windows runtime, реальные включаемые облачные providers,
-TLS/firewall, secret store, off-host backup/retention, мониторинг/дежурство и
-утверждённый rollback tag. До их закрытия это проверенный release candidate, но
-не разрешение выкатывать его в инфраструктуру заказчика.
+В этом независимом прогоне не было GGUF-файла и облачных ключей, поэтому managed
+inference и реальные DeepSeek/GigaChat остаются внешними gates независимо от
+исторических прогонов. Также открыты hosted CI на финальном commit, immutable
+registry digest, Windows runtime, TLS/firewall, secret store, off-host backup,
+monitoring/on-call и утверждённый rollback tag. До их закрытия это проверенный
+release candidate, но не разрешение выкатывать его в production заказчика.

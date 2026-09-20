@@ -98,6 +98,10 @@ public class AnalysisService
         {
             // 0. Распаковка ZIP архивов, если они присутствуют
             var expandedPaths = new List<string>();
+            const int maxArchiveEntries = 200;
+            const long maxArchiveUncompressedBytes = 200L * 1024 * 1024;
+            var acceptedArchiveEntries = 0;
+            long totalArchiveUncompressedBytes = 0;
             foreach (var path in userResponsePaths)
             {
                 var ext = Path.GetExtension(path).ToLowerSuffix();
@@ -111,10 +115,10 @@ public class AnalysisService
                     {
                         using (var archive = System.IO.Compression.ZipFile.OpenRead(path))
                         {
-                            const int maxArchiveEntries = 200;
-                            const long maxArchiveUncompressedBytes = 200L * 1024 * 1024;
-                            var acceptedEntries = 0;
-                            long totalUncompressedBytes = 0;
+                            if (archive.Entries.Count > maxArchiveEntries)
+                            {
+                                throw new InvalidDataException("ZIP-архив превышает безопасный лимит: 200 записей.");
+                            }
 
                             foreach (var entry in archive.Entries)
                             {
@@ -128,9 +132,10 @@ public class AnalysisService
                                 var nestedExt = Path.GetExtension(entry.Name).ToLowerSuffix();
                                 if (nestedExt == ".xlsx" || nestedExt == ".xls" || nestedExt == ".csv")
                                 {
-                                    acceptedEntries++;
-                                    totalUncompressedBytes += entry.Length;
-                                    if (acceptedEntries > maxArchiveEntries || totalUncompressedBytes > maxArchiveUncompressedBytes)
+                                    acceptedArchiveEntries++;
+                                    totalArchiveUncompressedBytes += entry.Length;
+                                    if (acceptedArchiveEntries > maxArchiveEntries
+                                        || totalArchiveUncompressedBytes > maxArchiveUncompressedBytes)
                                     {
                                         throw new InvalidDataException("ZIP-архив превышает безопасный лимит: 200 файлов или 200 МБ распакованных данных.");
                                     }

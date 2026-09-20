@@ -6,12 +6,19 @@ namespace ApiCore.Services;
 
 public class FileParser
 {
+    private const int MaxWorksheets = 100;
+    private const int MaxRows = 200_000;
+    private const int MaxColumns = 10_000;
+    private const long MaxCells = 2_000_000;
+
     public sealed record ExcelWorksheet(string Name, List<List<string>> Rows);
 
     public static List<ExcelWorksheet> ReadExcelWorksheets(string filePath)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         var worksheets = new List<ExcelWorksheet>();
+        var totalRows = 0;
+        long totalCells = 0;
         using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = ExcelReaderFactory.CreateReader(stream);
 
@@ -20,6 +27,12 @@ public class FileParser
             var rows = new List<List<string>>();
             while (reader.Read())
             {
+                totalRows++;
+                if (totalRows > MaxRows || reader.FieldCount > MaxColumns)
+                    throw new InvalidDataException("Excel-файл превышает безопасный лимит строк или столбцов.");
+                totalCells += reader.FieldCount;
+                if (totalCells > MaxCells)
+                    throw new InvalidDataException("Excel-файл превышает безопасный лимит в 2 000 000 ячеек.");
                 var row = new List<string>();
                 for (int i = 0; i < reader.FieldCount; i++)
                 {
@@ -32,6 +45,8 @@ public class FileParser
             if (rows.Any(row => row.Any(value => !string.IsNullOrWhiteSpace(value))))
             {
                 worksheets.Add(new ExcelWorksheet(reader.Name, rows));
+                if (worksheets.Count > MaxWorksheets)
+                    throw new InvalidDataException("Excel-файл содержит более 100 непустых листов.");
             }
         }
         while (reader.NextResult());
@@ -151,6 +166,8 @@ public class FileParser
         char delimiter = headerLine.Contains(';') ? ';' : ',';
         var headers = ParseCsvLine(headerLine, delimiter);
         var values = ParseCsvLine(valuesLine, delimiter);
+        if (headers.Count > MaxColumns || values.Count > MaxColumns)
+            throw new InvalidDataException("CSV-файл эталона превышает безопасный лимит столбцов.");
 
         var csvQuestions = new List<BenchmarkQuestion>();
         for (int i = 0; i < headers.Count; i++)
@@ -183,6 +200,7 @@ public class FileParser
         }
 
         var rows = new List<List<string>>();
+        long totalCells = 0;
         using (var stream = File.OpenRead(filePath))
         using (var reader = new StreamReader(stream, GetEncoding(stream)))
         {
@@ -197,7 +215,13 @@ public class FileParser
                     delimiter = line.Contains(';') ? ';' : ',';
                     isFirst = false;
                 }
-                rows.Add(ParseCsvLine(line, delimiter));
+                var parsed = ParseCsvLine(line, delimiter);
+                if (parsed.Count > MaxColumns)
+                    throw new InvalidDataException("CSV-файл превышает безопасный лимит столбцов.");
+                totalCells += parsed.Count;
+                if (rows.Count >= MaxRows || totalCells > MaxCells)
+                    throw new InvalidDataException("CSV-файл превышает безопасный лимит строк или ячеек.");
+                rows.Add(parsed);
             }
         }
 

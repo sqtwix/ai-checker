@@ -96,6 +96,37 @@ class AgentControllerTests(unittest.TestCase):
         enriched = controller._enrich_and_complete_response(response, valid_request())
         self.assertEqual([], enriched.anomalies)
 
+    def test_ai_timing_anomaly_is_removed_when_timing_does_not_cross_threshold(self):
+        controller = AgentController(Mock())
+        response = AnalysisResponse.model_validate({
+            "batch_id": "test-batch",
+            "global_course_summary": "summary",
+            "anomalies": [{
+                "student_id": "student-1",
+                "anomaly_type": "SpeedCheating",
+                "severity": "High",
+                "description": "Выдуманная аномалия скорости",
+            }],
+        })
+        enriched = controller._enrich_and_complete_response(response, valid_request(time_spent_seconds=60))
+        self.assertEqual([], enriched.anomalies)
+
+    def test_model_cannot_invent_suspicious_uniqueness_status(self):
+        response = AnalysisResponse.model_validate({
+            "batch_id": "test-batch",
+            "global_course_summary": "summary",
+            "student_detailed_analyses": [{
+                "student_id": "student-1",
+                "test_name": "Test 1",
+                "question_id": "q1",
+                "ai_score_percent": 100,
+                "uniqueness_status": "SuspiciousMatch",
+                "error_explanation": "Ответ верный.",
+            }],
+        })
+        enriched = AgentController(Mock())._enrich_and_complete_response(response, valid_request())
+        self.assertEqual("Normal", enriched.student_detailed_analyses[0].uniqueness_status)
+
     def test_source_data_overrides_hallucinated_metrics_and_english_text(self):
         request = valid_request()
         request.tests[0].student_attempts[0].answers[0].is_correct_by_lms = False

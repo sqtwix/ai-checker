@@ -128,6 +128,38 @@ class AgentController:
                     total_answers += 1
                     correct_answers += int(answer.is_correct_by_lms)
 
+        suspicious_answer_keys = set()
+        timing_evidence = set()
+        ignored_duplicate_values = {"", "неверный ответ", "неправильный ответ", "ошибка", "incorrect"}
+        for test in input_data.tests:
+            for attempt in test.student_attempts:
+                timed_answers = [
+                    answer for answer in attempt.answers
+                    if answer.time_spent_seconds is not None
+                ]
+                if timed_answers:
+                    average_time = sum(answer.time_spent_seconds for answer in timed_answers) / len(timed_answers)
+                    success_rate = sum(answer.is_correct_by_lms for answer in attempt.answers) * 100.0 / len(attempt.answers)
+                    if average_time < 10 and success_rate >= 80:
+                        timing_evidence.add((attempt.student_id, "SpeedCheating"))
+                    if average_time > 300 and success_rate < 50:
+                        timing_evidence.add((attempt.student_id, "ExtremeStruggling"))
+
+            for question in test.questions:
+                by_value = {}
+                for attempt in test.student_attempts:
+                    answer = next((item for item in attempt.answers if item.question_id == question.question_id), None)
+                    if answer and not answer.is_correct_by_lms:
+                        normalized = answer.user_answer.strip().casefold()
+                        if normalized not in ignored_duplicate_values:
+                            by_value.setdefault(normalized, []).append(attempt.student_id)
+                for student_ids in by_value.values():
+                    if len(student_ids) >= 2:
+                        suspicious_answer_keys.update(
+                            (student_id, test.test_name, question.question_id)
+                            for student_id in student_ids
+                        )
+
         ai_details = {}
         for detail in response.student_detailed_analyses:
             key = (detail.student_id, detail.test_name, detail.question_id)
@@ -154,7 +186,7 @@ class AgentController:
                 test_name=test_name,
                 question_id=question_id,
                 ai_score_percent=score,
-                uniqueness_status=(detail.uniqueness_status if detail else "Normal"),
+                uniqueness_status="SuspiciousMatch" if key in suspicious_answer_keys else "Normal",
                 error_explanation=explanation,
             ))
         response.student_detailed_analyses = completed_details
@@ -187,26 +219,7 @@ class AgentController:
                 critical_mass_errors=critical_errors,
             ))
 
-        students_with_timing = {
-            attempt.student_id
-            for test in input_data.tests
-            for attempt in test.student_attempts
-            if any(answer.time_spent_seconds is not None for answer in attempt.answers)
-        }
-        suspicious_students = set()
-        ignored_duplicate_values = {"", "неверный ответ", "неправильный ответ", "ошибка", "incorrect"}
-        for test in input_data.tests:
-            for question in test.questions:
-                by_value = {}
-                for attempt in test.student_attempts:
-                    answer = next((item for item in attempt.answers if item.question_id == question.question_id), None)
-                    if answer and not answer.is_correct_by_lms:
-                        normalized = answer.user_answer.strip().casefold()
-                        if normalized not in ignored_duplicate_values:
-                            by_value.setdefault(normalized, []).append(attempt.student_id)
-                for student_ids in by_value.values():
-                    if len(student_ids) >= 2:
-                        suspicious_students.update(student_ids)
+        suspicious_students = {key[0] for key in suspicious_answer_keys}
 
         allowed_types = {"SpeedCheating", "ExtremeStruggling", "SuspiciousMatch"}
         allowed_severities = {"Low", "Medium", "High"}
@@ -216,7 +229,9 @@ class AgentController:
         for anomaly in response.anomalies:
             if anomaly.student_id not in valid_students or anomaly.anomaly_type not in allowed_types:
                 continue
-            if anomaly.anomaly_type in {"SpeedCheating", "ExtremeStruggling"} and anomaly.student_id not in students_with_timing:
+            if anomaly.anomaly_type in {"SpeedCheating", "ExtremeStruggling"} and (
+                anomaly.student_id, anomaly.anomaly_type
+            ) not in timing_evidence:
                 continue
             if anomaly.anomaly_type == "SuspiciousMatch" and anomaly.student_id not in suspicious_students:
                 continue

@@ -154,8 +154,32 @@ public class AnalysisController : ControllerBase
                     tempDir,
                     HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault()))
             };
+
+            // Serialize the final capacity check with the insert. The earlier
+            // count is a fast rejection path only; concurrent requests can all
+            // pass it before any of them inserts a row.
+            await using var admissionTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            await _context.Database.ExecuteSqlRawAsync(
+                "LOCK TABLE analysis_reports IN SHARE ROW EXCLUSIVE MODE",
+                cancellationToken);
+            activeJobs = await _context.AnalysisReports.CountAsync(
+                existing => existing.Status == "Queued"
+                    || existing.Status == "Retrying"
+                    || existing.Status == "Processing",
+                cancellationToken);
+            if (activeJobs >= queueCapacity)
+            {
+                await admissionTransaction.RollbackAsync(cancellationToken);
+                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    error = "Очередь анализа временно заполнена. Повторите попытку позже."
+                });
+            }
+
             _context.AnalysisReports.Add(report);
             await _context.SaveChangesAsync(cancellationToken);
+            await admissionTransaction.CommitAsync(cancellationToken);
 
             return Accepted(new
             {
@@ -232,6 +256,7 @@ public class AnalysisController : ControllerBase
     }
 
     [HttpPut("rename/{taskId}")]
+    [RequestSizeLimit(4_096)]
     public async Task<IActionResult> RenameReport(string taskId, [FromBody] RenameReportRequest request)
     {
         var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -243,6 +268,11 @@ public class AnalysisController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { error = "Название не может быть пустым." });
+        }
+
+        if (request.Name.Trim().Length > 200)
+        {
+            return BadRequest(new { error = "Название не должно превышать 200 символов." });
         }
 
         var success = await _reportsService.RenameReportAsync(taskId, userId, request.Name);

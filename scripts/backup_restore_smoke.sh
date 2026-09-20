@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
-COMPOSE=(./scripts/compose.sh --env-file .env)
+DEPLOY_ENV_FILE=${DEPLOY_ENV_FILE:-.env}
+COMPOSE=(./scripts/compose.sh --env-file "$DEPLOY_ENV_FILE")
 suffix="$(date +%Y%m%d%H%M%S)_$$"
 database="ai_checker_restore_smoke_$suffix"
 temporary=$(mktemp -d)

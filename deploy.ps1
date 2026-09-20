@@ -67,7 +67,7 @@ $aiPort = Require-Port AI_DRIVER_PORT
 $publishedPorts = @($frontendPort, $apiPort, $aiPort)
 if (($publishedPorts | Select-Object -Unique).Count -ne 3) { throw "Published ports must be different" }
 Require-Number JWT_EXPIRY_MINUTES 5 10080 | Out-Null
-$maxRequest = Require-Number MAX_REQUEST_SIZE_MB 1 1024
+$maxRequest = Require-Number MAX_REQUEST_SIZE_MB 1 100
 $maxFile = Require-Number MAX_FILE_SIZE_MB 1 1024
 if ($maxFile -gt $maxRequest) { throw "MAX_FILE_SIZE_MB cannot exceed MAX_REQUEST_SIZE_MB" }
 Require-Number MAX_RESPONSE_FILE_COUNT 1 1000 | Out-Null
@@ -151,7 +151,7 @@ if ($localEnabled -eq "true") {
 function Remove-SmokeUsers {
     Invoke-Compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DELETE FROM users WHERE email LIKE \$\$smoke-%@example.test\$\$;"' | Out-Null
 }
-$smokeArgs = @("--base-url", "http://frontend")
+$smokeArgs = @("--base-url", "http://frontend:8080")
 if (-not $values.ENABLED_MODELS) { $smokeArgs += "--expect-no-ai" }
 Remove-SmokeUsers
 Get-Content -Raw (Join-Path $PSScriptRoot "scripts/smoke_stack.py") |

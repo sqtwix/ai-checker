@@ -103,8 +103,8 @@ Demo UI без backend:
 | Сервис | Host → container | Публичность по умолчанию |
 | --- | --- | --- |
 | frontend | `3000 → 80` | все интерфейсы |
-| api-core | `127.0.0.1:5000 → 5000` | только host |
-| ai-driver | `127.0.0.1:8000 → 8000` | только host |
+| api-core | `5000` | только внутренняя Docker-сеть |
+| ai-driver | `8000` | только внутренняя Docker-сеть |
 | PostgreSQL | `5432` | только внутренняя Docker-сеть |
 | local-llm | `8080` | только внутренняя Docker-сеть, профиль `local-ai` |
 
@@ -112,9 +112,10 @@ Demo UI без backend:
 
 ```bash
 curl -fsS http://localhost:3000/health
-curl -fsS http://127.0.0.1:5000/health/ready
-curl -fsS http://127.0.0.1:8000/health
 ./scripts/compose.sh --env-file .env ps
+./scripts/compose.sh --env-file .env exec -T api-core curl -fsS http://localhost:5000/health/ready
+./scripts/compose.sh --env-file .env exec -T ai-driver python -c \
+  "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"
 ```
 
 `healthy` AI-driver означает готовность HTTP-сервиса, но не проверяет внешний
@@ -126,12 +127,14 @@ chat inference при каждом штатном deploy. Облачный provi
 
 - frontend добавляет базовые security headers и ограничивает запрос 100 МБ;
 - API ограничивает каждый файл 50 МБ, до 50 response-файлов и очередь до 20 задач;
-- ZIP ограничен 200 файлами и 200 МБ распакованных данных;
+- ZIP ограничен суммарно на запрос 200 записями и 200 МБ распакованных данных;
+- parser ограничен 100 листами, 200 000 строками, 10 000 столбцами и
+  2 000 000 ячеек на файл;
 - загружаемые имена не используются как пути;
 - внутренние ошибки провайдера не возвращаются пользователю;
 - идентификаторы студентов псевдонимизируются перед отправкой модели и
   восстанавливаются в сохранённом результате;
-- API и AI Driver работают non-root с read-only root filesystem;
+- frontend, API и AI Driver работают non-root с read-only root filesystem;
 - Docker logs ограничены ротацией `10 МБ × 5`;
 - Swagger API включён только в Development.
 

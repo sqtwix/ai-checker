@@ -20,6 +20,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddControllers();
 
 var maxUploadSizeMb = builder.Configuration.GetValue<long?>("Uploads:MaxRequestSizeMb") ?? 100;
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = maxUploadSizeMb * 1024 * 1024;
+});
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit = maxUploadSizeMb * 1024 * 1024;
@@ -210,10 +214,17 @@ builder.Services.AddHttpClient("ai-driver-health", client =>
 
 var app = builder.Build();
 
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-});
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    ForwardLimit = 1
+};
+// Production API is reachable only from the internal Compose network. Trust the
+// single frontend proxy hop so per-client rate limits do not collapse to the
+// nginx container address. Development publishes the API on loopback only.
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.Use(async (context, next) =>
 {

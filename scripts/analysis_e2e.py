@@ -198,10 +198,15 @@ def main():
     parser.add_argument("--model", default="local_llm")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--expect-failure",
+        help="Expected substring of a terminal validation error; skips local shape parsing.",
+    )
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
-    shape = sample_shape(args.benchmark, args.response)
-    expected_questions, expected_students, expected_test_names, correct_answers, total_answers, expected_rates = shape
+    if not args.expect_failure:
+        shape = sample_shape(args.benchmark, args.response)
+        expected_questions, expected_students, expected_test_names, correct_answers, total_answers, expected_rates = shape
 
     owner_token = register(base, "E2E Owner")
     other_token = register(base, "E2E Other")
@@ -231,6 +236,8 @@ def main():
             seen.append(state["status"])
             print(f"task {task_id}: {state['status']}", flush=True)
         if state["status"] == "Completed":
+            if args.expect_failure:
+                raise AssertionError(f"Task completed but failure containing {args.expect_failure!r} was expected")
             result = state["result"]
             if args.output:
                 args.output.write_text(
@@ -239,6 +246,13 @@ def main():
                 )
             break
         if state["status"] == "Failed":
+            if args.expect_failure and args.expect_failure.casefold() in (state.get("error") or "").casefold():
+                print(json.dumps({
+                    "task_id": task_id,
+                    "statuses": seen,
+                    "expected_failure": state.get("error"),
+                }, ensure_ascii=False))
+                return
             raise AssertionError(state.get("error"))
         time.sleep(2)
     else:

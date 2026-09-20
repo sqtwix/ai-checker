@@ -39,6 +39,12 @@ jobs:
           dotnet build api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release
           dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "doc/Эталон ответов Python.csv" "doc/Ответы студентов Python - Тест 1.csv"
           dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "example_data/001/Эталон ответов ЭК 001.xlsx" "example_data/001/Массив ответов 001_группа 1.xlsx"
+          vertical_output=$(dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "example_data/005/005_Эталоны ответов.xlsx" "example_data/005/005_Массив ответов.xlsx")
+          grep -q 'OK: 5 tests' <<< "$vertical_output"
+          if dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "example_data/069/Эталон ответов 069.xlsx" "example_data/069/Массив ответов 069_группа 3.xlsx"; then
+            echo "Expected unmatched benchmark question to fail" >&2
+            exit 1
+          fi
       - name: Test AI driver
         working-directory: ai-driver
         run: |
@@ -46,6 +52,7 @@ jobs:
           python -m compileall -q .
           python -m unittest discover -s tests -v
           python -m pip check
+          python -m py_compile ../scripts/*.py
       - name: Lint and build frontend
         working-directory: frontend
         run: |
@@ -62,3 +69,4 @@ jobs:
             echo "Generated or secret file is tracked" >&2
             exit 1
           fi
+          git diff --check

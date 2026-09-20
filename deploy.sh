@@ -28,7 +28,7 @@ FRONTEND_PORT=${FRONTEND_PORT:-3000}; API_PORT=${API_PORT:-5000}; AI_DRIVER_PORT
 validate_port FRONTEND_PORT "$FRONTEND_PORT"; validate_port API_PORT "$API_PORT"; validate_port AI_DRIVER_PORT "$AI_DRIVER_PORT"
 [[ "$FRONTEND_PORT" != "$API_PORT" && "$FRONTEND_PORT" != "$AI_DRIVER_PORT" && "$API_PORT" != "$AI_DRIVER_PORT" ]] || fail "published ports must be different"
 validate_number JWT_EXPIRY_MINUTES "${JWT_EXPIRY_MINUTES:-60}" 5 10080
-validate_number MAX_REQUEST_SIZE_MB "${MAX_REQUEST_SIZE_MB:-100}" 1 1024
+validate_number MAX_REQUEST_SIZE_MB "${MAX_REQUEST_SIZE_MB:-100}" 1 100
 validate_number MAX_FILE_SIZE_MB "${MAX_FILE_SIZE_MB:-50}" 1 1024
 validate_number MAX_RESPONSE_FILE_COUNT "${MAX_RESPONSE_FILE_COUNT:-50}" 1 1000
 validate_number ANALYSIS_QUEUE_CAPACITY "${ANALYSIS_QUEUE_CAPACITY:-20}" 1 10000
@@ -143,7 +143,7 @@ if [[ "$ENABLE_LOCAL_LLM" == true ]]; then
     || fail "local model passed HTTP health but failed chat inference"
 fi
 
-smoke_args=(--base-url "http://frontend")
+smoke_args=(--base-url "http://frontend:8080")
 [[ -z "${ENABLED_MODELS:-}" ]] && smoke_args+=(--expect-no-ai)
 cleanup_smoke_users() {
   compose_cmd exec -T postgres sh -lc \

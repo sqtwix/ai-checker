@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MODEL = os.getenv("MOCK_MODEL", "ai-checker-smoke")
 DELAY = float(os.getenv("MOCK_DELAY_SECONDS", "0"))
 ASSERT_PSEUDONYMS = os.getenv("ASSERT_PSEUDONYMS", "false").lower() == "true"
+RESPONSE_MODE = os.getenv("MOCK_RESPONSE_MODE", "valid").lower()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -31,7 +32,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if DELAY:
             time.sleep(DELAY)
-        content = json.dumps({
+        content = "{malformed-json" if RESPONSE_MODE == "malformed" else json.dumps({
             "batch_id": "provider-smoke",
             "global_course_summary": "OpenAI-compatible provider smoke completed",
             "test_summaries": [],

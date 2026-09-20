@@ -43,12 +43,18 @@ public class UserController : ControllerBase
     }
 
     [HttpPut("settings")]
+    [RequestSizeLimit(32_768)]
     public async Task<IActionResult> SaveSettings([FromBody] JsonElement settings)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized(new { error = "Пользователь не авторизован." });
+        }
+
+        if (settings.ValueKind != JsonValueKind.Object || settings.GetRawText().Length > 16_384)
+        {
+            return BadRequest(new { error = "Настройки должны быть JSON-объектом размером не более 16 КБ." });
         }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
