@@ -4,6 +4,9 @@ namespace ApiCore.Models;
 
 public class CourseBatchAnalysisResult
 {
+    [JsonPropertyName("pdf_data")]
+    public System.Text.Json.JsonElement? PdfData { get; set; }
+
     [JsonPropertyName("batch_id")]
     public string BatchId { get; set; } = string.Empty;
 
@@ -30,6 +33,9 @@ public class CourseBatchAnalysisResult
 
     [JsonPropertyName("limitations")]
     public List<string> Limitations { get; set; } = new();
+
+    [JsonPropertyName("data_notes")]
+    public List<string> DataNotes { get; set; } = new();
 }
 
 public class TestSummaryDto
@@ -58,6 +64,9 @@ public class CriticalMassErrorDto
 
 public class StudentDetailedAnalysisDto
 {
+    [JsonPropertyName("attempt_id")]
+    public string AttemptId { get; set; } = string.Empty;
+
     [JsonPropertyName("student_id")]
     public string StudentId { get; set; } = string.Empty;
 

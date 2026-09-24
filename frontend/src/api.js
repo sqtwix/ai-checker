@@ -1,6 +1,8 @@
 ﻿export const isOfflineMode =
   String(import.meta.env.VITE_OFFLINE_MODE || "").toLowerCase() === "true";
 
+import { requestJson } from "./httpClient";
+
 const MODEL_CATALOG = {
   deepseek: { value: "DeepSeek", label: "DeepSeek" },
   gigachat: { value: "GigaChat", label: "GigaChat" },
@@ -171,42 +173,9 @@ export function seedOfflineReports(reports) {
 }
 
 export async function request(endpoint, options = {}) {
-  const token = localStorage.getItem("token");
-
-  const headers = {
-    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
+  return requestJson(`${API_BASE_URL}${endpoint}`, options, {
+    authenticated: !endpoint.startsWith("/auth/"),
   });
-
-  if (!response.ok) {
-    let errorMsg = "Произошла ошибка при выполнении запроса";
-    try {
-      const errData = await response.json();
-      errorMsg = errData.error || errData.detail || errData.message || errorMsg;
-    } catch {
-      // JSON parsing failed, try plain text
-      try {
-        const text = await response.text();
-        if (text) errorMsg = text;
-      } catch {
-        // ignore
-      }
-    }
-    throw new Error(errorMsg);
-  }
-
-  // Handle empty responses (like 204 No Content)
-  if (response.status === 204) {
-    return null;
-  }
-
-  return response.json();
 }
 
 export async function login(email, password) {
@@ -286,6 +255,7 @@ export async function getAnalysisStatus(taskId) {
     if (!task) {
       return { status: "Failed", error: "Offline task not found" };
     }
+    if (task.status === "Cancelled") return { status: "Cancelled" };
 
     if (Date.now() - task.createdAt < 1600) {
       return { status: "Processing" };
@@ -307,6 +277,19 @@ export async function getAnalysisStatus(taskId) {
   }
 
   return request(`/analysis/status/${taskId}`);
+}
+
+export async function cancelAnalysis(taskId) {
+  if (isOfflineMode) {
+    const tasks = getOfflineTasks();
+    if (!tasks[taskId]) throw new Error("Задача не найдена.");
+    tasks[taskId].status = "Cancelled";
+    saveOfflineTasks(tasks);
+    const report = { ...tasks[taskId].report, status: "Cancelled", title: "Анализ остановлен", result: null, errors: [], recommendations: [] };
+    saveOfflineReports([report, ...getOfflineReports().filter(item => item.id !== taskId)]);
+    return { status: "Cancelled" };
+  }
+  return request(`/analysis/cancel/${encodeURIComponent(taskId)}`, { method: "POST" });
 }
 
 export async function getAnalysisHistory(options = {}) {

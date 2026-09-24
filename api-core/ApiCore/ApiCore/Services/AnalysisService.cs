@@ -1,4 +1,4 @@
-﻿using ApiCore.Models;
+using ApiCore.Models;
 using ApiCore.Data;
 using System.Text;
 using System.Text.Json;
@@ -45,7 +45,7 @@ public class AnalysisService
                 report.Status = "Failed";
                 report.Error = "Не удалось восстановить данные задачи. Запустите анализ повторно.";
                 report.UpdatedAt = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await SaveReportAsync(report, cancellationToken);
             }
             return;
         }
@@ -64,7 +64,7 @@ public class AnalysisService
             report.Status = "Failed";
             report.Error = "Сохранённые данные задачи повреждены. Запустите анализ повторно.";
             report.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveReportAsync(report, cancellationToken);
             return;
         }
 
@@ -96,6 +96,11 @@ public class AnalysisService
 
         try
         {
+            if (report?.Status is "Cancelling" or "Cancelled")
+            {
+                await SaveReportAsync(report, cancellationToken);
+                return;
+            }
             // 0. Распаковка ZIP архивов, если они присутствуют
             var expandedPaths = new List<string>();
             const int maxArchiveEntries = 200;
@@ -120,8 +125,10 @@ public class AnalysisService
                                 throw new InvalidDataException("ZIP-архив превышает безопасный лимит: 200 записей.");
                             }
 
+                            var entryIndex = 0;
                             foreach (var entry in archive.Entries)
                             {
+                                entryIndex++;
                                 cancellationToken.ThrowIfCancellationRequested();
                                 if (string.IsNullOrEmpty(entry.Name)) continue;
                                 
@@ -140,17 +147,12 @@ public class AnalysisService
                                         throw new InvalidDataException("ZIP-архив превышает безопасный лимит: 200 файлов или 200 МБ распакованных данных.");
                                     }
 
-                                    var destinationPath = Path.Combine(zipExtractDir, entry.Name);
-                                    
-                                    // Обработка конфликтов имен файлов
-                                    int counter = 1;
-                                    while (File.Exists(destinationPath))
-                                    {
-                                        var nameWithoutExt = Path.GetFileNameWithoutExtension(entry.Name);
-                                        destinationPath = Path.Combine(zipExtractDir, $"{nameWithoutExt}_{counter++}{nestedExt}");
-                                    }
-                                    
-                                    entry.ExtractToFile(destinationPath);
+                                    // Stable paths on retry keep test/question IDs and checkpoints
+                                    // unchanged. A separate directory preserves duplicate filenames.
+                                    var entryDirectory = Path.Combine(zipExtractDir, entryIndex.ToString());
+                                    Directory.CreateDirectory(entryDirectory);
+                                    var destinationPath = Path.Combine(entryDirectory, entry.Name);
+                                    entry.ExtractToFile(destinationPath, overwrite: true);
                                     expandedPaths.Add(destinationPath);
                                 }
                             }
@@ -185,7 +187,7 @@ public class AnalysisService
                     report.Error = $"Validation failed: {errors}";
                     report.PayloadJson = null;
                     report.UpdatedAt = DateTime.UtcNow;
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await SaveReportAsync(report, cancellationToken);
                 }
                 return;
             }
@@ -229,6 +231,7 @@ public class AnalysisService
                     throw new InvalidDataException("AI-driver вернул пустой или некорректный результат.");
                 }
                 RestoreStudentIds(result, studentAliases);
+                result.PdfData = PdfReportDataBuilder.Build(payload);
                 responseBody = JsonSerializer.Serialize(result, jsonSerializerOptions);
                 if (report != null)
                 {
@@ -237,7 +240,7 @@ public class AnalysisService
                     report.Error = null;
                     report.PayloadJson = null;
                     report.UpdatedAt = DateTime.UtcNow;
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await SaveReportAsync(report, cancellationToken);
                 }
             }
             else
@@ -260,7 +263,7 @@ public class AnalysisService
                         report.PayloadJson = null;
                         report.UpdatedAt = DateTime.UtcNow;
                     }
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await SaveReportAsync(report, cancellationToken);
                 }
             }
         }
@@ -292,7 +295,7 @@ public class AnalysisService
                     report.NextRetryAt = null;
                 }
                 report.UpdatedAt = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync(CancellationToken.None);
+                await SaveReportAsync(report, CancellationToken.None);
             }
         }
         catch (Exception ex)
@@ -314,11 +317,12 @@ public class AnalysisService
                     report.PayloadJson = null;
                     report.UpdatedAt = DateTime.UtcNow;
                 }
-                await _dbContext.SaveChangesAsync(CancellationToken.None);
+                await SaveReportAsync(report, CancellationToken.None);
             }
         }
         finally
         {
+            if (report?.Status == "Cancelled") cleanupFiles = true;
             try
             {
                 if (cleanupFiles && Directory.Exists(tempDir))
@@ -337,6 +341,33 @@ public class AnalysisService
     {
         var maxAttempts = Math.Clamp(_configuration.GetValue<int?>("AnalysisQueue:MaxAttempts") ?? 3, 1, 10);
         return report.AttemptCount < maxAttempts;
+    }
+
+    private async Task SaveReportAsync(AnalysisReport report, CancellationToken token)
+    {
+        // Cancellation and completion compete in one atomic database update.
+        // A late model result or retry can never resurrect a cancelled task.
+        var changed = await _dbContext.AnalysisReports
+            .Where(item => item.Id == report.Id && item.Status != "Cancelling" && item.Status != "Cancelled")
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.Status, report.Status)
+                .SetProperty(item => item.ResultJson, report.ResultJson)
+                .SetProperty(item => item.Error, report.Error)
+                .SetProperty(item => item.PayloadJson, report.PayloadJson)
+                .SetProperty(item => item.NextRetryAt, report.NextRetryAt)
+                .SetProperty(item => item.UpdatedAt, report.UpdatedAt), token);
+        if (changed == 0)
+        {
+            await _dbContext.AnalysisReports.Where(item => item.Id == report.Id && item.Status == "Cancelling")
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(item => item.Status, "Cancelled")
+                    .SetProperty(item => item.Error, "Анализ остановлен пользователем.")
+                    .SetProperty(item => item.ResultJson, (string?)null)
+                    .SetProperty(item => item.PayloadJson, (string?)null)
+                    .SetProperty(item => item.NextRetryAt, (DateTime?)null)
+                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), token);
+        }
+        await _dbContext.Entry(report).ReloadAsync(token);
     }
 
     private static void ScheduleRetry(AnalysisReport report, string message)

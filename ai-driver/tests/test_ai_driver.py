@@ -227,7 +227,7 @@ class AgentControllerTests(unittest.TestCase):
             for answer in attempt["answers"]
         ))
 
-    def test_bounded_pipeline_does_not_retry_semantic_failure_or_call_later_agents(self):
+    def test_bounded_cloud_pipeline_does_not_retry_semantic_failure_or_call_later_agents(self):
         main_agent = Mock()
         main_agent.execute.side_effect = AgentSemanticError("invalid JSON")
         anomaly_agent = Mock()
@@ -242,7 +242,7 @@ class AgentControllerTests(unittest.TestCase):
             "padding": "x" * 10000,
         }
 
-        result = __import__("json").loads(manager.start_local_llm_processing(__import__("json").dumps(source)))
+        result = __import__("json").loads(manager.start_deepseek_processing(__import__("json").dumps(source)))
 
         self.assertEqual("degraded", result["quality_status"])
         self.assertTrue(result["limitations"])

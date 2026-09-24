@@ -26,6 +26,8 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: ai-driver/requirements.txt
+      - name: Test deploy CLI
+        run: bash scripts/tests/test_deploy.sh
       - name: Validate Compose
         run: |
           docker compose --env-file .env.example config --quiet
@@ -37,6 +39,7 @@ jobs:
           dotnet restore api-core/ApiCore/ApiCore/ApiCore.csproj
           dotnet build api-core/ApiCore/ApiCore/ApiCore.csproj -c Release --no-restore
           dotnet build api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release
+          dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- --self-test
           dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "doc/Эталон ответов Python.csv" "doc/Ответы студентов Python - Тест 1.csv"
           dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "example_data/001/Эталон ответов ЭК 001.xlsx" "example_data/001/Массив ответов 001_группа 1.xlsx"
           vertical_output=$(dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- "example_data/005/005_Эталоны ответов.xlsx" "example_data/005/005_Массив ответов.xlsx")
@@ -58,6 +61,7 @@ jobs:
         run: |
           npm ci
           npm run lint
+          npm test
           npm run build
       - name: Build production images
         run: |

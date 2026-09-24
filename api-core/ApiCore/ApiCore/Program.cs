@@ -193,11 +193,12 @@ builder.Services.AddHttpClient<AnalysisService>(client =>
 {
     var aiDriverUrl = builder.Configuration["AiDriver:Url"] ?? "http://localhost:8000";
     client.BaseAddress = new Uri(aiDriverUrl.EndsWith("/") ? aiDriverUrl : aiDriverUrl + "/");
-    var timeoutSeconds = Math.Clamp(
-        builder.Configuration.GetValue<int?>("AnalysisQueue:PipelineTimeoutSeconds") ?? 1200,
-        60,
-        3600);
-    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+    // Full local analysis may take hours. Individual model calls retain their
+    // own timeout; zero disables only this whole-job HTTP deadline.
+    var timeoutSeconds = builder.Configuration.GetValue<int?>("AnalysisQueue:PipelineTimeoutSeconds") ?? 0;
+    client.Timeout = timeoutSeconds <= 0
+        ? Timeout.InfiniteTimeSpan
+        : TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 60, 86400));
 });
 builder.Services.AddHttpClient<AiProviderAvailabilityService>(client =>
 {

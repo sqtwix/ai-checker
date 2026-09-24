@@ -23,6 +23,7 @@ class TestSummary(BaseModel):
     critical_mass_errors: List[CriticalMassError] = Field(default_factory=list)
 
 class StudentDetailedAnalysis(BaseModel):
+    attempt_id: str = ""
     # ID студента
     student_id: str
     # Название теста
@@ -70,3 +71,4 @@ class AnalysisResponse(BaseModel):
     generation_mode: Literal["llm", "fallback"] = "llm"
     quality_status: Literal["verified", "degraded", "failed"] = "verified"
     limitations: List[str] = Field(default_factory=list)
+    data_notes: List[str] = Field(default_factory=list)

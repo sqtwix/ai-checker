@@ -5,8 +5,18 @@
 # setup_routes - функция для регистрации эндпоинтов агентов.
 # Добавляет маршруты для DeepSeek, GigaChat и локального provider.
 
+from uuid import UUID
+from backend.cancellation import cancel_job
+
+
 def setup_routes(agent_controller):
     router = APIRouter()
+
+    @router.post("/cancel/{batch_id}")
+    async def cancel_analysis(batch_id: UUID):
+        # This service is internal; the public API checks report ownership.
+        cancel_job(str(batch_id))
+        return {"status": "Cancelling"}
 
     router.add_api_route(
         path="/get_deepseek_data_analysis",

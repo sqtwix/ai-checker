@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 echo "[1/7] Validate scripts and Compose configurations"
 bash -n deploy.sh scripts/init_env.sh scripts/compose.sh scripts/verify.sh scripts/backup_restore_smoke.sh
+bash scripts/tests/test_deploy.sh
 ./scripts/compose.sh --env-file .env.example config >/dev/null
 ./scripts/compose.sh --env-file .env.example --profile local-ai config >/dev/null
 ./scripts/compose.sh -f docker-compose.offline.yml --env-file .env.example config >/dev/null
@@ -21,6 +22,7 @@ fi
 
 echo "[3/7] Exercise CSV and XLSX parsers"
 dotnet build api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release
+dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- --self-test
 dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- \
   "doc/Эталон ответов Python.csv" "doc/Ответы студентов Python - Тест 1.csv"
 dotnet run --project api-core/ApiCore/ParserSmoke/ParserSmoke.csproj -c Release --no-build -- \
@@ -64,6 +66,7 @@ if command -v npm >/dev/null 2>&1; then
     cd frontend
     npm ci
     npm run lint
+    npm test
     npm run build
   )
 else

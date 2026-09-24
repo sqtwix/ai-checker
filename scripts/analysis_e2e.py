@@ -79,11 +79,12 @@ def csv_shape(benchmark, response_files):
         student_ids.update(row[0].strip() for row in data_rows)
         for offset in range(question_count):
             result_index = 5 + offset * 4
-            results = [row[result_index].strip().lower() for row in data_rows if len(row) > result_index]
+            results = [row[result_index].strip().lower() for row in data_rows
+                       if len(row) > result_index and row[result_index].strip().lower() in {"lcnwu5wcgk", "r1s987zw3e"}]
             passed = sum(value == "lcnwu5wcgk" for value in results)
             correct_answers += passed
             total_answers += len(results)
-            fail_rate = round((len(results) - passed) * 100.0 / len(results), 1) if results else 0.0
+            fail_rate = (len(results) - passed) * 100.0 / len(results) if results else 0.0
             if fail_rate >= 40.0:
                 expected_critical_rates.append(fail_rate)
     return question_count, student_ids, test_names, correct_answers, total_answers, expected_critical_rates
@@ -198,6 +199,8 @@ def main():
     parser.add_argument("--model", default="local_llm")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--require-verified", action="store_true")
+    parser.add_argument("--expected-shape", type=Path, help="JSON from ParserSmoke --json for an XLSX fixture")
     parser.add_argument(
         "--expect-failure",
         help="Expected substring of a terminal validation error; skips local shape parsing.",
@@ -205,7 +208,14 @@ def main():
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
     if not args.expect_failure:
-        shape = sample_shape(args.benchmark, args.response)
+        if args.expected_shape:
+            expected = json.loads(args.expected_shape.read_text(encoding="utf-8-sig"))
+            shape = (
+                expected["questions"], set(expected["students"]), set(expected["tests"]),
+                expected["correct_answers"], expected["answers"], expected["critical_rates"],
+            )
+        else:
+            shape = sample_shape(args.benchmark, args.response)
         expected_questions, expected_students, expected_test_names, correct_answers, total_answers, expected_rates = shape
 
     owner_token = register(base, "E2E Owner")
@@ -262,6 +272,9 @@ def main():
         result, task_id, total_answers, expected_students, expected_test_names,
         correct_answers, total_answers, expected_rates,
     )
+    if args.require_verified:
+        assert result.get("quality_status") == "verified", result.get("limitations")
+        assert not result.get("limitations"), result["limitations"]
 
     status, history = request_json(f"{base}/api/v1/analysis/history", token=owner_token)
     assert status == 200 and any(item["id"] == task_id and item["status"] == "Completed" for item in history)

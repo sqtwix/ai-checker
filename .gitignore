@@ -31,5 +31,9 @@ dist/
 
 # Runtime uploads and local data
 temp_uploads/
-models/
+/models/
 backup*.sql
+
+# Local reports, screenshots and one-off verification artifacts
+/output/
+/tmp/

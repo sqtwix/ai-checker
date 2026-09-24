@@ -8,6 +8,7 @@ from typing import List, Optional
 
 class StudentAnswer(BaseModel):
     question_id: str
+    reference_answer: str = ""
     # Ответ пользователя (текстовый или кодовый)
     user_answer: str
     # Флаг правильности от LMS (эталон для сравнения с оценкой ИИ)
@@ -16,6 +17,7 @@ class StudentAnswer(BaseModel):
     time_spent_seconds: Optional[int] = None
 
 class StudentAttempt(BaseModel):
+    attempt_id: str = ""
     # Обезличенный идентификатор студента
     student_id: str
     # Дата завершения попытки
@@ -51,3 +53,5 @@ class AnalysisRequest(BaseModel):
     course_name: str
     # Массив тестов для анализа
     tests: List[Test]
+    input_warnings: List[str] = Field(default_factory=list)
+    data_notes: List[str] = Field(default_factory=list)

@@ -1,6 +1,7 @@
 ﻿from openai import OpenAI
 import json
 import logging
+from backend.cancellation import check_cancelled
 import os
 
 # ========================= Agent Client =========================
@@ -52,7 +53,7 @@ class AgentClient:
         except Exception as e:
             raise Exception("AgentClient Initialization Exception: agent initialization failed - " + str(e))
 
-    def execute(self, system_prompt: str, user_prompt: str) -> str:
+    def execute(self, system_prompt: str, user_prompt: str, *, response_schema: dict | None = None) -> str:
         # Выполняет запрос к модели и возвращает JSON-строку с ответом.
         # Параметры:
         #   system_prompt - системный промпт, определяющий роль агента
@@ -62,34 +63,39 @@ class AgentClient:
         # Исключения:
         #   Exception - при ошибках API, таймаутах или невалидном JSON в ответе
 
+        check_cancelled()
         logger.info("Agent [%s] starting with model %s", self.specialization, self.model)
 
         try:
             timeout_seconds = max(30, min(900, int(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "360"))))
-            configured_output_tokens = max(128, min(4096, int(os.getenv("AI_MAX_OUTPUT_TOKENS", "1000"))))
-            role_output_limits = {
-                "main-analyzer": 240,
-                "anomalies-analyzer": 300,
-                "statistics-summarizer": 350,
-            }
-            max_output_tokens = min(configured_output_tokens, role_output_limits.get(self.specialization, 600))
+            max_output_tokens = max(128, min(4096, int(os.getenv("AI_MAX_OUTPUT_TOKENS", "1000"))))
+            response_format = {"type": "json_object"}
+            if response_schema is not None:
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "analysis", "strict": True, "schema": response_schema},
+                }
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                response_format={"type": "json_object"},
+                response_format=response_format,
                 temperature=0.3,
                 max_tokens=max_output_tokens,
                 timeout=timeout_seconds
             )
 
         except Exception as e:
+            check_cancelled()
             logger.error("Agent [%s] transport failed: %s", self.specialization, str(e))
             raise AgentTransportError("provider request failed") from e
 
+        check_cancelled()
         try:
+            if response.choices[0].finish_reason == "length":
+                raise ValueError("model response reached AI_MAX_OUTPUT_TOKENS before completion")
             raw_content = response.choices[0].message.content
             normalized_content = self._normalize_json_object(raw_content)
             parsed = json.loads(normalized_content)

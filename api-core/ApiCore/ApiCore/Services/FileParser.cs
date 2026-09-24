@@ -77,6 +77,17 @@ public class FileParser
             batchRequest.Tests.AddRange(ParseUserResponseFile(userPath, benchmark));
         }
 
+        batchRequest.InputWarnings = benchmark.Warnings.Distinct().ToList();
+        if (benchmark.ExcludedEmptyAnswers > 0)
+            batchRequest.DataNotes.Add($"Пустых позиций без оценки LMS исключено: {benchmark.ExcludedEmptyAnswers}.");
+        if (benchmark.UngradedAnswers > 0)
+            batchRequest.InputWarnings.Add($"Записей без распознаваемой оценки LMS исключено из процентов: {benchmark.UngradedAnswers}. Они не приравнены к ошибкам.");
+        var emptyAttempts = batchRequest.Tests.SelectMany(test => test.StudentAttempts).Count(attempt => attempt.Answers.Count == 0);
+        if (emptyAttempts > 0)
+            batchRequest.DataNotes.Add($"Попыток без оценённых ответов: {emptyAttempts}. Они учтены в количестве попыток, но не в процентах ответов.");
+        if (!batchRequest.Tests.SelectMany(test => test.StudentAttempts).Any(attempt => attempt.Answers.Count > 0))
+            throw new InvalidDataException("В выгрузке нет ответов с распознаваемой оценкой LMS. Проверьте колонки «Результат».");
+
         var unmatched = batchRequest.Tests
             .SelectMany(test => test.Questions
                 .Where(question => question.ReferenceAnswer == "Эталонный ответ не найден в мастер-файле")
@@ -98,8 +109,11 @@ public class FileParser
     private sealed class BenchmarkCatalog
     {
         public Dictionary<string, List<BenchmarkQuestion>> Sheets { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<string> Warnings { get; } = new();
+        public int ExcludedEmptyAnswers { get; set; }
+        public int UngradedAnswers { get; set; }
 
-        public string? Resolve(string? sheetName, string questionText, int occurrence)
+        public string? Resolve(string? sheetName, string questionText, List<string> exportedReferences, string label)
         {
             IEnumerable<BenchmarkQuestion> candidates;
             if (!string.IsNullOrWhiteSpace(sheetName) && Sheets.TryGetValue(sheetName, out var sheet))
@@ -115,11 +129,24 @@ public class FileParser
                 candidates = Sheets.Values.SelectMany(items => items);
             }
 
-            return candidates
+            var matches = candidates
                 .Where(item => item.QuestionText.Equals(questionText, StringComparison.OrdinalIgnoreCase))
-                .Skip(occurrence)
                 .Select(item => item.ReferenceAnswer)
-                .FirstOrDefault();
+                .Where(answer => !string.IsNullOrWhiteSpace(answer))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (matches.Count == 0) return null;
+            if (exportedReferences.Count > 0)
+            {
+                // Repeated prompts can have different answer options and order.
+                // The reference in the same four-column block identifies its variant.
+                if (exportedReferences.Any(answer => !matches.Contains(answer, StringComparer.OrdinalIgnoreCase)))
+                    Warnings.Add($"{label}: эталон в выгрузке отличается от мастер-файла. Для пояснений использован эталон соответствующей записи LMS; проверьте оба источника.");
+                if (exportedReferences.Count > 1)
+                    Warnings.Add($"{label}: в выгрузке несколько вариантов эталона. Для каждого ответа сохранён его вариант; проверьте настройки задания.");
+                return exportedReferences[0];
+            }
+            if (matches.Count == 1) return matches[0];
+            throw new InvalidDataException($"{label}: одинаковому тексту вопроса соответствуют разные эталоны. Заполните «Правильный ответ» в выгрузке, чтобы определить вариант задания.");
         }
     }
 
@@ -292,7 +319,6 @@ public class FileParser
         // Первые 4 колонки (0,1,2,3) — это Пользователь, Дата, Статус, Баллы. 
         // Начиная с 4-й идут блоки вопросов с шагом в 4 колонки.
         var questionColumnsIndices = new List<(string QuestionId, string QuestionText, int StartIdx)>();
-        var questionOccurrences = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int questionCounter = 1;
 
         for (int i = 4; i < headers.Count; i += 4)
@@ -306,9 +332,12 @@ public class FileParser
             string questionId = $"q_{testPayload.TestName.Replace(" ", "_")}_{questionCounter++}";
 
             // Ищем правильный ответ в словаре эталона. Если его там нет, подстрахуемся дефолтным
-            questionOccurrences.TryGetValue(questionText, out var occurrence);
-            questionOccurrences[questionText] = occurrence + 1;
-            string refAnswer = benchmark.Resolve(sheetName, questionText, occurrence)
+            var exportedReferences = rows.Skip(2)
+                .Where(row => row.Count > i + 3 && !string.IsNullOrWhiteSpace(row[0]))
+                .Select(row => CleanText(row[i + 3]))
+                .Where(answer => !string.IsNullOrWhiteSpace(answer))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            string refAnswer = benchmark.Resolve(sheetName, questionText, exportedReferences, $"{testName}, вопрос {questionCounter - 1}")
                 ?? "Эталонный ответ не найден в мастер-файле";
 
             testPayload.Questions.Add(new AiQuestionDto
@@ -334,7 +363,8 @@ public class FileParser
 
             var attempt = new StudentAttemptDto
             {
-                StudentId = studentId,
+                StudentId = studentId.Trim(),
+                AttemptId = $"attempt_{r - 1}",
                 CompletionDate = fields[1],
                 Status = fields[2],
                 TotalScoreText = fields[3]
@@ -344,27 +374,52 @@ public class FileParser
             foreach (var qMap in questionColumnsIndices)
             {
                 int baseIdx = qMap.StartIdx;
-                if (baseIdx + 2 < fields.Count)
+                if (baseIdx < fields.Count)
                 {
+                    var resultCode = baseIdx + 1 < fields.Count ? fields[baseIdx + 1].Trim() : "";
+                    var userAnswer = baseIdx + 2 < fields.Count ? CleanText(fields[baseIdx + 2]) : "";
+                    var isCorrectByLms = resultCode.Equals("lcnwu5wcgk", StringComparison.OrdinalIgnoreCase);
+                    var isIncorrectByLms = resultCode.Equals("r1s987zw3e", StringComparison.OrdinalIgnoreCase);
+                    var exportedReference = baseIdx + 3 < fields.Count ? CleanText(fields[baseIdx + 3]) : "";
+                    if (!isCorrectByLms && !isIncorrectByLms)
+                    {
+                        // Missing assignment/result is not an incorrect answer.
+                        // An explicitly graded blank answer is retained below.
+                        if (string.IsNullOrWhiteSpace(resultCode) && string.IsNullOrWhiteSpace(fields[baseIdx])
+                            && string.IsNullOrWhiteSpace(userAnswer) && string.IsNullOrWhiteSpace(exportedReference))
+                            benchmark.ExcludedEmptyAnswers++;
+                        else
+                            benchmark.UngradedAnswers++;
+                        continue;
+                    }
                     // Динамически обновляем тип вопроса в блоке Questions (например: "текстовый ввод")
                     var linkedQuestion = testPayload.Questions.FirstOrDefault(q => q.QuestionId == qMap.QuestionId);
-                    if (linkedQuestion != null && fields[baseIdx] != "Тип")
+                    if (linkedQuestion != null && !string.IsNullOrWhiteSpace(fields[baseIdx]) && fields[baseIdx] != "Тип")
                     {
                         linkedQuestion.QuestionType = fields[baseIdx];
                     }
 
-                    // Код lcnwu5wcgk означает верный ответ, r1s987zw3e — неверный
-                    bool isCorrectByLms = fields[baseIdx + 1].Equals("lcnwu5wcgk", StringComparison.OrdinalIgnoreCase);
+                    // If this row lacks a reference, only an unambiguous master
+                    // answer is safe; another student's variant is not a substitute.
+                    var answerReference = string.IsNullOrWhiteSpace(exportedReference)
+                        ? benchmark.Resolve(sheetName, qMap.QuestionText, [], $"{testName}, {qMap.QuestionId}") ?? ""
+                        : exportedReference;
 
+                    // Код lcnwu5wcgk означает верный ответ, r1s987zw3e — неверный
                     attempt.Answers.Add(new AiUserAnswerDto
                     {
                         QuestionId = qMap.QuestionId,
-                        UserAnswer = CleanText(fields[baseIdx + 2]),
+                        UserAnswer = userAnswer,
+                        ReferenceAnswer = answerReference,
                         IsCorrectByLms = isCorrectByLms,
                         // Выгрузка LMS не содержит время по вопросу. Отсутствующие
                         // данные нельзя подменять синтетикой: это создает ложные аномалии.
                         TimeSpentSeconds = null
                     });
+                }
+                else
+                {
+                    benchmark.ExcludedEmptyAnswers++;
                 }
             }
 

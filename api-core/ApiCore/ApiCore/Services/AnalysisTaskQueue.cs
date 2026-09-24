@@ -17,6 +17,7 @@ public sealed record AnalysisJobPayload(
 public sealed class AnalysisWorker(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
+    IHttpClientFactory httpClientFactory,
     ILogger<AnalysisWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -35,7 +36,15 @@ public sealed class AnalysisWorker(
 
                 using var scope = scopeFactory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<AnalysisService>();
-                await service.ProcessQueuedAnalysisAsync(taskId, stoppingToken);
+                using var watchToken = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                var cancellationWatch = WatchCancellationAsync(taskId, watchToken.Token);
+                try { await service.ProcessQueuedAnalysisAsync(taskId, stoppingToken); }
+                finally
+                {
+                    await watchToken.CancelAsync();
+                    try { await cancellationWatch; }
+                    catch (OperationCanceledException) when (watchToken.IsCancellationRequested) { }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -57,7 +66,7 @@ public sealed class AnalysisWorker(
 
         var reports = await db.AnalysisReports.FromSqlRaw("""
             SELECT * FROM analysis_reports
-            WHERE status IN ('Queued', 'Retrying')
+            WHERE status IN ('Queued', 'Retrying', 'Cancelling', 'Cancelled')
               AND payload_json IS NOT NULL
               AND (next_retry_at IS NULL OR next_retry_at <= NOW())
             ORDER BY created_at
@@ -72,6 +81,17 @@ public sealed class AnalysisWorker(
         }
 
         var maxAttempts = Math.Clamp(configuration.GetValue<int?>("AnalysisQueue:MaxAttempts") ?? 3, 1, 10);
+        if (report.Status is "Cancelling" or "Cancelled")
+        {
+            TryDeleteJobFiles(report.PayloadJson, logger);
+            report.Status = "Cancelled";
+            report.Error = "Анализ остановлен пользователем.";
+            report.PayloadJson = null;
+            report.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return null;
+        }
         if (report.AttemptCount >= maxAttempts)
         {
             TryDeleteJobFiles(report.PayloadJson, logger);
@@ -93,6 +113,30 @@ public sealed class AnalysisWorker(
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation("Analysis {TaskId} claimed from PostgreSQL queue, attempt {Attempt}", report.Id, report.AttemptCount);
         return report.Id;
+    }
+
+    private async Task WatchCancellationAsync(string taskId, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var status = await db.AnalysisReports.Where(report => report.Id == taskId).Select(report => report.Status).FirstOrDefaultAsync(token);
+                if (status == "Cancelling")
+                {
+                    using var client = httpClientFactory.CreateClient("ai-driver-health");
+                    using var response = await client.PostAsync("agents/cancel/" + Uri.EscapeDataString(taskId), null, token);
+                    if (response.IsSuccessStatusCode) return;
+                }
+            }
+            catch (Exception error) when (!token.IsCancellationRequested)
+            {
+                logger.LogWarning(error, "Will retry cancellation check for {TaskId}", taskId);
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), token);
+        }
     }
 
     private static void TryDeleteJobFiles(string? payloadJson, ILogger logger)

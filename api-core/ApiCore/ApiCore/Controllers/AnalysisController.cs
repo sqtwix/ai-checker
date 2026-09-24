@@ -242,6 +242,31 @@ public class AnalysisController : ControllerBase
         return NotFound(new { error = $"Задача с ID {taskId} не найдена." });
     }
 
+    [HttpPost("cancel/{taskId}")]
+    public async Task<IActionResult> CancelAnalysis(string taskId)
+    {
+        if (!Guid.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId))
+            return Unauthorized();
+        var owned = _context.AnalysisReports.Where(report => report.Id == taskId && report.UserId == userId);
+        var changed = await owned.Where(report => report.Status == "Queued" || report.Status == "Retrying")
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(report => report.Status, "Cancelled")
+                .SetProperty(report => report.Error, "Анализ остановлен пользователем.")
+                .SetProperty(report => report.NextRetryAt, (DateTime?)null)
+                .SetProperty(report => report.UpdatedAt, DateTime.UtcNow));
+        changed += await owned.Where(report => report.Status == "Processing")
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(report => report.Status, "Cancelling")
+                .SetProperty(report => report.Error, "Остановка запрошена. Завершается текущий запрос к модели.")
+                .SetProperty(report => report.NextRetryAt, (DateTime?)null)
+                .SetProperty(report => report.UpdatedAt, DateTime.UtcNow));
+        var status = await owned.Select(report => report.Status).FirstOrDefaultAsync();
+        if (status == null) return NotFound(new { error = "Задача не найдена." });
+        if (changed == 0 && status is not ("Cancelling" or "Cancelled"))
+            return Conflict(new { error = "Задача уже завершена. Обновите отчёт.", status });
+        return Ok(new { status });
+    }
+
     [HttpGet("history")]
     public async Task<IActionResult> GetHistory([FromQuery] bool includeArchived = false, [FromQuery] bool onlyArchived = false)
     {

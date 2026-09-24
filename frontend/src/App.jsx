@@ -1,10 +1,11 @@
-﻿import { useState, useEffect, useRef } from "react";
-import { Archive, Clock3, Files, Pencil, Save, Upload, XCircle } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Archive, Files, Pencil, Save, Upload, XCircle } from "lucide-react";
 import {
   login,
   register,
   uploadFiles,
   getAnalysisStatus,
+  cancelAnalysis,
   getAnalysisHistory,
   renameAnalysisReport,
   isOfflineMode,
@@ -21,6 +22,10 @@ import { ConfirmDialog, NamingDialog, ToastStack } from "./components/Feedback";
 import { AuthPage, SettingsPage, StudentsPage } from "./components/Pages";
 import { loadUserSettings, persistUserSettings, readLocalSettings } from "./settingsService";
 import { getSidebarMaxWidth, layoutLimits, readLayoutPreferences, writeLayoutPreferences } from "./layoutPreferences";
+import { SESSION_EXPIRED_EVENT, SESSION_EXPIRED_MESSAGE } from "./httpClient";
+import { watchAnalysis } from "./analysisPolling";
+import { ReportFindings, ReportRecommendations } from "./components/ReportFindings";
+import { AnalysisProgress } from "./components/AnalysisProgress";
 
 const navigateTo = (route) => {
   window.location.hash = route;
@@ -310,7 +315,9 @@ function App() {
   const [selectedResponseFiles, setSelectedResponseFiles] = useState([]);
   const showValidation = Boolean(selectedBenchFile && selectedResponseFiles.length > 0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisStatus, setAnalysisStatus] = useState("Uploading");
+  const [analysisSubmittedAt, setAnalysisSubmittedAt] = useState(null);
+  const [analysisChecks, setAnalysisChecks] = useState({});
   const [analysisTaskId, setAnalysisTaskId] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -340,6 +347,7 @@ function App() {
   const responsesInputRef = useRef(null);
   const saveActionsRef = useRef(null);
   const profileActionsRef = useRef(null);
+  const stopAnalysisPollingRef = useRef(null);
 
   // Naming & Renaming states
   const [showNamingModal, setShowNamingModal] = useState(false);
@@ -348,6 +356,7 @@ function App() {
   const [isSavingName, setIsSavingName] = useState(false);
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [stoppingTaskId, setStoppingTaskId] = useState(null);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [isEditingReportContent, setIsEditingReportContent] = useState(false);
 
@@ -427,6 +436,49 @@ function App() {
     setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
   };
 
+  const recordAnalysisCheck = (taskId, status) => {
+    setAnalysisChecks(current => ({ ...current, [taskId]: { checkedAt: Date.now(), status, error: false } }));
+  };
+
+  useEffect(() => {
+    const expireSession = () => {
+      stopAnalysisPollingRef.current?.();
+      setIsAnalyzing(false);
+      setAnalysisChecks({});
+      setShowNamingModal(false);
+      setIsProfileMenuOpen(false);
+      setToken("");
+      setUser("");
+      setUserEmail("");
+      setMockReports([]);
+      setArchivedReports([]);
+      setLoginEmail(localStorage.getItem("userEmail") || "");
+      setAuthError(SESSION_EXPIRED_MESSAGE);
+      setRoute("login");
+      navigateTo("login");
+    };
+    const syncSession = (event) => {
+      if (event.key !== "token") return;
+      if (!event.newValue) expireSession();
+      else {
+        stopAnalysisPollingRef.current?.();
+        setIsAnalyzing(false);
+        setToken(event.newValue);
+        setUser(localStorage.getItem("username") || "");
+        setUserEmail(localStorage.getItem("userEmail") || "");
+        setAuthError("");
+        navigateTo("upload");
+      }
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, expireSession);
+    window.addEventListener("storage", syncSession);
+    return () => {
+      stopAnalysisPollingRef.current?.();
+      window.removeEventListener(SESSION_EXPIRED_EVENT, expireSession);
+      window.removeEventListener("storage", syncSession);
+    };
+  }, []);
+
   const handleSettingsChange = async (patch) => {
     const nextSettings = {
       ...userSettings,
@@ -446,10 +498,15 @@ function App() {
         if (ts.critical_mass_errors) {
           ts.critical_mass_errors.forEach((err) => {
             mappedErrors.push({
-              priority: err.fail_rate_percent >= 50 ? "high" : "medium",
+              priority: err.fail_rate_percent >= 60 ? "high" : "medium",
               val: `${Math.round(err.fail_rate_percent)}%`,
               question: `${ts.test_name}: Вопрос ${err.question_id}`,
-              text: `${err.error_pattern_description} (Причина: ${err.methodological_reason})`
+              text: `${err.error_pattern_description} (Причина: ${err.methodological_reason})`,
+              testName: ts.test_name,
+              questionId: err.question_id,
+              failRate: err.fail_rate_percent,
+              errorDescription: err.error_pattern_description,
+              methodologicalReason: err.methodological_reason,
             });
           });
         }
@@ -466,7 +523,7 @@ function App() {
     return {
       id: apiReport.id,
       course: apiReport.courseName || "Электронный курс",
-      title: result.global_course_summary || (["Queued", "Retrying", "Processing"].includes(apiReport.status) ? "Анализ выполняется..." : "Анализ провалился"),
+      title: result.global_course_summary || (apiReport.status === "Cancelled" ? "Анализ остановлен" : ["Queued", "Retrying", "Processing", "Cancelling"].includes(apiReport.status) ? "Анализ выполняется..." : "Анализ провалился"),
       errors: mappedErrors,
       recommendations: mappedRecommendations,
       status: apiReport.status,
@@ -478,11 +535,20 @@ function App() {
   };
 
   const fetchHistory = async () => {
+    const requestToken = localStorage.getItem("token");
+    if (!requestToken) return;
     try {
       const historyData = await getAnalysisHistory();
+      if (localStorage.getItem("token") !== requestToken) return;
       if (Array.isArray(historyData)) {
         const mapped = isOfflineMode ? historyData : historyData.map(mapReportFromApi);
         setMockReports(mapped);
+        const checkedAt = Date.now();
+        setAnalysisChecks(current => ({
+          ...current,
+          ...Object.fromEntries(mapped.filter(report => ["Queued", "Retrying", "Processing", "Cancelling"].includes(report.status))
+            .map(report => [report.id, { checkedAt, status: report.status, error: false }])),
+        }));
       }
     } catch (err) {
       console.error("Failed to fetch analysis history:", err);
@@ -490,8 +556,11 @@ function App() {
   };
 
   const fetchArchivedHistory = async () => {
+    const requestToken = localStorage.getItem("token");
+    if (!requestToken) return;
     try {
       const historyData = await getAnalysisHistory({ onlyArchived: true });
+      if (localStorage.getItem("token") !== requestToken) return;
       if (Array.isArray(historyData)) {
         const mapped = isOfflineMode ? historyData : historyData.map(mapReportFromApi);
         setArchivedReports(mapped);
@@ -573,15 +642,36 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const hasProcessing = mockReports.some(r => ["Queued", "Retrying", "Processing"].includes(r.status));
-    if (!hasProcessing) return;
-
-    const interval = setInterval(() => {
-      fetchHistory();
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [mockReports]);
+    const processing = mockReports.filter(r => ["Queued", "Retrying", "Processing", "Cancelling"].includes(r.status));
+    if (!token || !processing.length) return;
+    let stopped = false;
+    let timer;
+    const refreshStatuses = async () => {
+      try {
+        const statuses = await Promise.all(processing.map(report => getAnalysisStatus(report.id)));
+        if (!stopped) {
+          const checkedAt = Date.now();
+          setAnalysisChecks(current => ({
+            ...current,
+            ...Object.fromEntries(statuses.map((status, index) => [processing[index].id, { checkedAt, status: status.status, error: false }])),
+          }));
+        }
+        if (!stopped && statuses.some((status, index) => status.status !== processing[index].status)) {
+          await fetchHistory();
+        }
+      } catch (error) {
+        if (error.status === 401) return;
+        if (!stopped) setAnalysisChecks(current => ({
+          ...current,
+          ...Object.fromEntries(processing.map(report => [report.id, { ...current[report.id], error: true }])),
+        }));
+        console.error("Failed to refresh analysis status:", error);
+      }
+      if (!stopped) timer = setTimeout(refreshStatuses, 5000);
+    };
+    timer = setTimeout(refreshStatuses, 5000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [mockReports, token]);
 
   // Sync route with window hash and enforce route protection
   useEffect(() => {
@@ -711,6 +801,10 @@ function App() {
   };
 
   const handleLogout = () => {
+    stopAnalysisPollingRef.current?.();
+    setAnalysisChecks({});
+    resetUploadForm();
+    setShowNamingModal(false);
     setIsProfileMenuOpen(false);
     localStorage.removeItem("token");
     localStorage.removeItem("username");
@@ -752,12 +846,32 @@ function App() {
     setSelectedBenchFile(null);
     setSelectedResponseFiles([]);
     setIsAnalyzing(false);
-    setAnalysisProgress(0);
+    setAnalysisStatus("Uploading");
+    setAnalysisSubmittedAt(null);
     if (benchInputRef.current) benchInputRef.current.value = "";
     if (responsesInputRef.current) responsesInputRef.current.value = "";
   };
 
+  const stopGeneration = async (taskId) => {
+    if (!taskId || stoppingTaskId) return;
+    setStoppingTaskId(taskId);
+    try {
+      const result = await cancelAnalysis(taskId);
+      recordAnalysisCheck(taskId, result.status);
+      if (taskId === analysisTaskId) {
+        setAnalysisStatus(result.status);
+        if (result.status === "Cancelled") setIsAnalyzing(false);
+      }
+      await fetchHistory();
+      notify({ type: "info", title: result.status === "Cancelled" ? "Анализ остановлен" : "Остановка запрошена", message: "Автоматического повторного запуска не будет." });
+    } catch (error) {
+      if (error.status !== 401) notify({ type: "error", title: "Не удалось остановить анализ", message: error.message });
+      await fetchHistory();
+    } finally { setStoppingTaskId(null); }
+  };
+
   const startAnalysis = async () => {
+    if (isAnalyzing) return;
     if (!selectedBenchFile || selectedResponseFiles.length === 0) {
       notify({
         type: "warning",
@@ -768,11 +882,14 @@ function App() {
     }
 
     setIsAnalyzing(true);
-    setAnalysisProgress(0);
+    setAnalysisStatus("Uploading");
+    setAnalysisSubmittedAt(Date.now());
     setAnalysisTaskId("Отправка...");
+    const uploadSessionToken = localStorage.getItem("token");
 
     try {
       const data = await uploadFiles(selectedBenchFile, selectedResponseFiles, selectedModel);
+      if (localStorage.getItem("token") !== uploadSessionToken) return;
       
       const serverTaskId = data.task_id;
       setAnalysisTaskId(serverTaskId);
@@ -784,99 +901,59 @@ function App() {
         message: data.message || "Файлы успешно отправлены и приняты в обработку.",
       });
 
-      setAnalysisProgress(10);
+      setAnalysisStatus("Queued");
+      recordAnalysisCheck(serverTaskId, "Queued");
 
-      // Polling function
-      let pollAttempts = 0;
-      let consecutivePollErrors = 0;
-      const poll = async () => {
-        pollAttempts += 1;
-        if (pollAttempts > 200) {
-          setIsAnalyzing(false);
-          notify({
-            type: "error",
-            title: "Истекло время ожидания",
-            message: "Задача продолжает храниться в истории. Обновите страницу и проверьте ее статус позже.",
-          });
-          return;
-        }
-
-        try {
-          const statusRes = await getAnalysisStatus(serverTaskId);
-          consecutivePollErrors = 0;
+      await fetchHistory();
+      if (!uploadSessionToken || localStorage.getItem("token") !== uploadSessionToken) return;
+      stopAnalysisPollingRef.current?.();
+      stopAnalysisPollingRef.current = watchAnalysis({
+        getStatus: () => getAnalysisStatus(serverTaskId),
+        onStatus: async (statusRes) => {
+          recordAnalysisCheck(serverTaskId, statusRes.status);
+          setAnalysisStatus(statusRes.status);
           if (statusRes.status === "Completed") {
-            setAnalysisProgress(100);
-
-            // Construct new report based on real result from model
-            const result = statusRes.result || {};
+            await fetchHistory();
+            if (localStorage.getItem("token") !== uploadSessionToken) return;
             const cleanBenchName = selectedBenchFile.name.replace(/\.[^/.]+$/, "");
             const cleanResponseName = selectedResponseFiles[0].name.replace(/\.[^/.]+$/, "");
             const courseName = `${cleanBenchName} & ${cleanResponseName}${
               selectedResponseFiles.length > 1 ? ` +${selectedResponseFiles.length - 1}` : ""
             }`;
 
-            // Map DTO critical mass errors
-            const mappedErrors = [];
-            if (result.test_summaries) {
-              result.test_summaries.forEach((ts) => {
-                if (ts.critical_mass_errors) {
-                  ts.critical_mass_errors.forEach((err) => {
-                    mappedErrors.push({
-                      priority: err.fail_rate_percent >= 50 ? "high" : "medium",
-                      val: `${Math.round(err.fail_rate_percent)}%`,
-                      question: `${ts.test_name}: Вопрос ${err.question_id}`,
-                      text: `${err.error_pattern_description} (Причина: ${err.methodological_reason})`
-                    });
-                  });
-                }
-              });
-            }
-
-            // Map recommendations
-            const mappedRecommendations = [];
-            if (result.course_recommendations) {
-              result.course_recommendations.forEach((rec) => {
-                mappedRecommendations.push(`[${rec.priority}] ${rec.target}: ${rec.action_item}`);
-              });
-            }
-
             setNamingTaskId(serverTaskId);
             setNamingValue(courseName);
             setShowNamingModal(true);
             resetUploadForm();
+          } else if (statusRes.status === "Cancelled") {
+            setIsAnalyzing(false);
+            await fetchHistory();
+            notify({ type: "info", title: "Анализ остановлен", message: "Чтобы начать заново, запустите новый анализ." });
           } else if (statusRes.status === "Failed") {
             setIsAnalyzing(false);
             await fetchHistory();
+            if (localStorage.getItem("token") !== uploadSessionToken) return;
             notify({
               type: "error",
               title: "Анализ провалился",
               message: statusRes.error || "Неизвестная ошибка на стороне сервера.",
             });
-          } else {
-            setAnalysisProgress(statusRes.status === "Processing" ? 60 : 25);
-            setTimeout(poll, 3000);
           }
-        } catch (err) {
-          console.error("Polling error:", err);
-          consecutivePollErrors += 1;
-          if (consecutivePollErrors >= 5) {
-            setIsAnalyzing(false);
-            notify({
-              type: "error",
-              title: "Связь с сервером потеряна",
-              message: "Проверьте подключение. Задача сохранена в истории и может продолжить выполняться.",
-            });
-          } else {
-            setTimeout(poll, 3000);
-          }
-        }
-      };
-
-      // Start polling after 2 seconds
-      setTimeout(poll, 2000);
+        },
+        onError: (error) => {
+          setIsAnalyzing(false);
+          if (error.status === 401) return;
+          notify({
+            type: "error",
+            title: "Не удалось обновить статус",
+            message: `${error.message} Задача сохранена в истории; повторно отправлять файлы не нужно.`,
+          });
+        },
+      });
 
     } catch (err) {
       setIsAnalyzing(false);
+      if (err.status === 401) return;
       notify({
         type: "error",
         title: "Не удалось отправить файлы",
@@ -1120,19 +1197,9 @@ function App() {
       notify({
         type: "error",
         title: "Не удалось сохранить файл",
+        message: err.message || "Повторите экспорт после обновления страницы.",
       });
     }
-  };
-
-  const getTimelineStepClass = (stepIndex, currentProgress) => {
-    const thresholds = [0, 25, 50, 75];
-    if (currentProgress >= thresholds[stepIndex]) {
-      if (currentProgress > thresholds[stepIndex] + 20 || currentProgress === 100) {
-        return "done";
-      }
-      return "active-step";
-    }
-    return "";
   };
 
   const renderActivePage = () => {
@@ -1217,8 +1284,8 @@ function App() {
 
                 {showValidation && (
                   <div className="validation-box" id="upload-validation-box" style={{ marginTop: "20px" }}>
-                    <b>Проверка пройдена</b>
-                    <p>Колонки распознаны успешно. Формат корректен.</p>
+                    <b>Файлы выбраны</b>
+                    <p>Структура и содержимое будут проверены после отправки.</p>
                   </div>
                 )}
 
@@ -1260,36 +1327,14 @@ function App() {
               </section>
             </div>
           ) : (
-            <div className="panel" id="upload-progress-panel" style={{ marginTop: "0" }}>
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow" id="progress-task-id">Задача {analysisTaskId}</p>
-                  <h2>Выполнение анализа</h2>
-                </div>
-                <span className="badge" id="progress-percentage-badge">{analysisProgress}%</span>
-              </div>
-              <div className="progress-track">
-                <span id="progress-fill-bar" style={{ width: `${analysisProgress}%`, transition: "width 0.4s ease" }}></span>
-              </div>
-              <div className="timeline" id="progress-timeline-steps">
-                <div id="step-1" className={getTimelineStepClass(0, analysisProgress)}>
-                  <b>Файлы приняты</b>
-                  <p>Эталон и файлы ответов прошли базовую проверку.</p>
-                </div>
-                <div id="step-2" className={getTimelineStepClass(1, analysisProgress)}>
-                  <b>Данные приведены к JSON</b>
-                  <p>{isOfflineMode ? "Offline mode подготовил локальную структуру отчета." : "api-core подготовил структуру для ai-driver."}</p>
-                </div>
-                <div id="step-3" className={getTimelineStepClass(2, analysisProgress)}>
-                  <b>ИИ-агенты анализируют паттерны</b>
-                  <p>{isOfflineMode ? "Создается шаблонный демо-результат для проверки интерфейса." : "Статистик проверяет время, методист ищет типовые ошибки."}</p>
-                </div>
-                <div id="step-4" className={getTimelineStepClass(3, analysisProgress)}>
-                  <b>Формируется отчёт</b>
-                  <p>{isOfflineMode ? "JSON будет доступен локально после завершения." : "Excel, JSON и PDF будут готовы после завершения."}</p>
-                </div>
-              </div>
-            </div>
+            <AnalysisProgress
+              createdAt={mockReports.find(report => report.id === analysisTaskId)?.createdAt || analysisSubmittedAt}
+              status={analysisStatus}
+              check={analysisChecks[analysisTaskId]}
+              isOfflineMode={isOfflineMode}
+              onStop={() => stopGeneration(analysisTaskId)}
+              stopping={stoppingTaskId === analysisTaskId}
+            />
           )}
         </section>
       );
@@ -1313,18 +1358,20 @@ function App() {
         );
       }
 
-      if (["Queued", "Retrying", "Processing"].includes(report.status)) {
+      if (["Queued", "Retrying", "Processing", "Cancelling"].includes(report.status)) {
         return (
           <section className="page active" id="report-detail" data-title="Детали отчёта">
-            <div className="state-panel">
-              <span className="state-icon">
-                <Clock3 size={28} strokeWidth={2.2} />
-              </span>
-              <h2>Анализ в процессе...</h2>
-              <p className="muted">ИИ-агенты в данный момент обрабатывают файлы ответов студентов. Пожалуйста, подождите.</p>
-            </div>
+            <AnalysisProgress createdAt={report.createdAt} status={report.status} check={analysisChecks[report.id]} isOfflineMode={isOfflineMode} onStop={() => stopGeneration(report.id)} stopping={stoppingTaskId === report.id} />
           </section>
         );
+      }
+
+      if (report.status === "Cancelled") {
+        return <section className="page active" id="report-detail" data-title="Детали отчёта">
+          <div className="state-panel"><h2>Анализ остановлен</h2><p className="muted">Обработка отменена. Для нового отчёта загрузите файлы и запустите анализ заново.</p>
+            <button className="secondary-button" onClick={() => navigateTo("upload")}>Новый анализ</button>
+          </div>
+        </section>;
       }
 
       if (report.status === "Failed") {
@@ -1389,11 +1436,14 @@ function App() {
               {report.result?.quality_status === "degraded" && (
                 <div className="quality-notice" role="status">
                   <b>Результат с ограничениями.</b>{" "}
-                  Числовые показатели проверены по исходным данным, но качественные пояснения требуют экспертного просмотра.
+                  При обработке обнаружены замечания к исходным данным или пояснениям.
                   {Array.isArray(report.result.limitations) && report.result.limitations.length > 0 && (
                     <span> {report.result.limitations.join(" ")}</span>
                   )}
                 </div>
+              )}
+              {report.result?.data_notes?.length > 0 && (
+                <p className="muted">{report.result.data_notes.join(" ")}</p>
               )}
             </div>
             <div className="export-actions">
@@ -1549,30 +1599,9 @@ function App() {
               </section>
             </div>
           ) : (
-            <div className="grid two">
-              <section className="panel">
-                <h3>Критичные массовые ошибки</h3>
-                <div id="report-errors-container">
-                  {report.errors.map((err, i) => (
-                    <article key={i} className="finding">
-                      <span className={`priority ${err.priority}`}>{err.val}</span>
-                      <div>
-                        <b>{err.question}</b>
-                        <p>{err.text}</p>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-
-              <section className="panel">
-                <h3>Рекомендации</h3>
-                <ul className="recommendations" id="report-recommendations-list">
-                  {report.recommendations.map((rec, i) => (
-                    <li key={i}>{rec}</li>
-                  ))}
-                </ul>
-              </section>
+            <div className="grid report-content-grid">
+              <ReportFindings key={report.id} errors={report.errors} />
+              <ReportRecommendations recommendations={report.recommendations} details={isOfflineMode ? null : report.result?.course_recommendations} errors={report.errors} />
             </div>
           )}
         </section>

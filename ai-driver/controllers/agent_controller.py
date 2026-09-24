@@ -8,6 +8,7 @@ from schemas.analysis_response import (
     TestSummary,
 )
 from schemas.analysis_request import AnalysisRequest
+from backend.cancellation import AnalysisCancelled
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 import json
@@ -92,6 +93,8 @@ class AgentController:
             return self._handle_provider_failure("Local LLM", input_data, e)
 
     def _handle_provider_failure(self, provider: str, input_data: AnalysisRequest, error: Exception):
+        if isinstance(error, AnalysisCancelled):
+            raise HTTPException(status_code=409, detail="Анализ остановлен пользователем.") from error
         logger.exception("%s processing failed", provider)
         allow_fallback = os.getenv("ALLOW_PROGRAMMATIC_FALLBACK", "false").lower() == "true"
         if not allow_fallback:
@@ -108,7 +111,9 @@ class AgentController:
         fallback_data["generation_mode"] = "fallback"
         fallback_data["quality_status"] = "degraded"
         fallback_data["limitations"] = ["ИИ-провайдер был недоступен; сформирован только детерминированный резервный отчёт."]
-        return JSONResponse(status_code=200, content=fallback_data)
+        enriched = self._enrich_and_complete_response(AnalysisResponse.model_validate(fallback_data), input_data)
+        enriched.global_course_summary = "РЕЗЕРВНЫЙ РАСЧЕТ БЕЗ ИИ. " + enriched.global_course_summary
+        return JSONResponse(status_code=200, content=enriched.model_dump())
 
     def _enrich_and_complete_response(self, response: AnalysisResponse, input_data: AnalysisRequest) -> AnalysisResponse:
         """Merge qualitative AI text with authoritative source-derived metrics."""
@@ -118,13 +123,16 @@ class AgentController:
         total_attempts = 0
         total_answers = 0
         correct_answers = 0
+        legacy_keys = {}
         for test in input_data.tests:
             total_attempts += len(test.student_attempts)
-            for attempt in test.student_attempts:
+            for index, attempt in enumerate(test.student_attempts):
+                attempt_id = attempt.attempt_id or f"attempt_{index + 1}"
                 for answer in attempt.answers:
-                    key = (attempt.student_id, test.test_name, answer.question_id)
+                    key = (attempt.student_id, test.test_name, attempt_id, answer.question_id)
                     valid_answers[key] = answer
                     ordered_keys.append(key)
+                    legacy_keys.setdefault((attempt.student_id, test.test_name, answer.question_id), []).append(key)
                     total_answers += 1
                     correct_answers += int(answer.is_correct_by_lms)
 
@@ -147,28 +155,33 @@ class AgentController:
 
             for question in test.questions:
                 by_value = {}
-                for attempt in test.student_attempts:
+                for index, attempt in enumerate(test.student_attempts):
                     answer = next((item for item in attempt.answers if item.question_id == question.question_id), None)
                     if answer and not answer.is_correct_by_lms:
                         normalized = answer.user_answer.strip().casefold()
                         if normalized not in ignored_duplicate_values:
-                            by_value.setdefault(normalized, []).append(attempt.student_id)
-                for student_ids in by_value.values():
-                    if len(student_ids) >= 2:
+                            by_value.setdefault(normalized, []).append((attempt.student_id, attempt.attempt_id or f"attempt_{index + 1}"))
+                for members in by_value.values():
+                    if len({student_id for student_id, _ in members}) >= 2:
                         suspicious_answer_keys.update(
-                            (student_id, test.test_name, question.question_id)
-                            for student_id in student_ids
+                            (student_id, test.test_name, attempt_id, question.question_id)
+                            for student_id, attempt_id in members
                         )
 
         ai_details = {}
         for detail in response.student_detailed_analyses:
-            key = (detail.student_id, detail.test_name, detail.question_id)
+            key = (detail.student_id, detail.test_name, detail.attempt_id, detail.question_id)
+            if not detail.attempt_id:
+                matches = legacy_keys.get((detail.student_id, detail.test_name, detail.question_id), [])
+                if len(matches) != 1:
+                    continue  # Never copy one attempt's explanation into another.
+                key = matches[0]
             if key in valid_answers and key not in ai_details:
                 ai_details[key] = detail
 
         completed_details = []
-        for student_id, test_name, question_id in ordered_keys:
-            key = (student_id, test_name, question_id)
+        for student_id, test_name, attempt_id, question_id in ordered_keys:
+            key = (student_id, test_name, attempt_id, question_id)
             answer = valid_answers[key]
             detail = ai_details.get(key)
             if answer.is_correct_by_lms:
@@ -183,6 +196,7 @@ class AgentController:
                     explanation = "Ответ отличается от эталона. Проверьте понимание темы и формат ответа."
             completed_details.append(StudentDetailedAnalysis(
                 student_id=student_id,
+                attempt_id=attempt_id,
                 test_name=test_name,
                 question_id=question_id,
                 ai_score_percent=score,
@@ -205,12 +219,12 @@ class AgentController:
                 if not matching:
                     continue
                 failed = sum(not answer.is_correct_by_lms for answer in matching)
-                fail_rate = round(failed * 100.0 / len(matching), 1)
+                fail_rate = failed * 100.0 / len(matching)
                 if fail_rate >= 40.0:
                     critical_errors.append(CriticalMassError(
                         question_id=question.question_id,
                         fail_rate_percent=fail_rate,
-                        error_pattern_description=f"Ошиблись {failed} из {len(matching)} студентов ({fail_rate:g}%).",
+                        error_pattern_description=f"Неверных ответов: {failed} из {len(matching)} оценённых ({fail_rate:.1f}%).",
                         methodological_reason="Проверьте формулировку вопроса и добавьте разбор типичной ошибки.",
                     ))
             critical_error_count += len(critical_errors)
@@ -255,7 +269,7 @@ class AgentController:
             f"Проанализировано попыток: {total_attempts}; ответов: {total_answers}. "
             f"Правильных ответов: {correct_answers} ({success_rate:g}%). "
             f"Вопросов с массовой ошибкой: {critical_error_count}. "
-            f"Подтверждённых аномалий: {len(response.anomalies)}."
+            f"Случаев для дополнительной проверки: {len(response.anomalies)}."
         )
 
         # Recommendations are operational decisions, so derive them only from
@@ -266,20 +280,23 @@ class AgentController:
             evidence_recommendations.append(CourseRecommendation(
                 target="Преподаватели",
                 action_item=(
-                    f"Проверьте {len(response.anomalies)} подтверждённых аномалий по исходным данным "
+                    f"Проверьте {len(response.anomalies)} отмеченных случаев по исходным данным "
                     "перед принятием организационных решений."
                 ),
                 priority="High",
             ))
-        for summary in response.test_summaries:
-            for error in summary.critical_mass_errors:
-                evidence_recommendations.append(CourseRecommendation(
-                    target=f"{summary.test_name}: вопрос {error.question_id}",
-                    action_item=(
-                        "Разберите типичную ошибку со студентами и повторно проверьте понимание темы."
-                    ),
-                    priority="High" if error.fail_rate_percent >= 60.0 else "Medium",
-                ))
+        ranked_errors = sorted(
+            ((summary, error) for summary in response.test_summaries for error in summary.critical_mass_errors),
+            key=lambda item: item[1].fail_rate_percent, reverse=True,
+        )
+        for summary, error in ranked_errors:
+            evidence_recommendations.append(CourseRecommendation(
+                target=f"{summary.test_name}: вопрос {error.question_id}",
+                action_item=(
+                    "Разберите типичную ошибку со студентами и повторно проверьте понимание темы."
+                ),
+                priority="High" if error.fail_rate_percent >= 60.0 else "Medium",
+            ))
         if not evidence_recommendations:
             evidence_recommendations.append(CourseRecommendation(
                 target="Курс",
@@ -287,6 +304,10 @@ class AgentController:
                 priority="Low",
             ))
         response.course_recommendations = evidence_recommendations[:3]
+        response.data_notes = list(input_data.data_notes)
+        response.limitations = list(dict.fromkeys(response.limitations + input_data.input_warnings))
+        if response.limitations:
+            response.quality_status = "degraded"
         return response
 
     @staticmethod
@@ -302,6 +323,8 @@ class AgentController:
 
         if not input_data.tests:
             errors.append("В запросе отсутствуют тесты для анализа")
+        if not any(attempt.answers for test in input_data.tests for attempt in test.student_attempts):
+            errors.append("Нет ответов с оценкой LMS для анализа")
 
         for test_idx, test in enumerate(input_data.tests):
             # Проверка наличия попыток студентов
@@ -356,7 +379,7 @@ class AgentController:
                     "text": q.question_text
                 }
                 
-            for attempt in test.student_attempts:
+            for index, attempt in enumerate(test.student_attempts):
                 total_attempts += 1
                 
                 # Извлечение успешности попытки
@@ -422,6 +445,7 @@ class AgentController:
                     
                     student_detailed_analyses.append({
                         "student_id": attempt.student_id,
+                        "attempt_id": attempt.attempt_id or f"attempt_{index + 1}",
                         "test_name": test.test_name,
                         "question_id": ans.question_id,
                         "ai_score_percent": ai_score,

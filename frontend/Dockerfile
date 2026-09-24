@@ -9,6 +9,7 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run lint
+RUN npm test
 RUN npm run build
 
 # Stage 2: Serve the application with Nginx

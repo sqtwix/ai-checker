@@ -1,4 +1,6 @@
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+$OutputEncoding = New-Object Text.UTF8Encoding($false)
 Set-Location $PSScriptRoot
 
 function New-HexSecret([int]$Bytes) {
@@ -44,7 +46,7 @@ if (-not $values.JWT_SECRET -or $values.JWT_SECRET.StartsWith("replace-") -or $v
 
 $lines = New-Object Collections.Generic.List[string]
 foreach ($line in [IO.File]::ReadAllLines($template)) {
-    if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=') { $lines.Add("$($Matches[1])=$($values[$Matches[1])") } else { $lines.Add($line) }
+    if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=') { $lines.Add("$($Matches[1])=$($values[$Matches[1]])") } else { $lines.Add($line) }
 }
 [IO.File]::WriteAllLines($envPath, $lines, (New-Object Text.UTF8Encoding($false)))
 $values = Read-EnvFile $envPath
@@ -74,9 +76,9 @@ Require-Number MAX_RESPONSE_FILE_COUNT 1 1000 | Out-Null
 Require-Number ANALYSIS_QUEUE_CAPACITY 1 10000 | Out-Null
 Require-Number ANALYSIS_MAX_ATTEMPTS 1 10 | Out-Null
 Require-Number AI_PROVIDER_TIMEOUT_SECONDS 30 900 | Out-Null
-Require-Number AI_PIPELINE_TIMEOUT_SECONDS 60 3600 | Out-Null
+$pipelineTimeout = Require-Number AI_PIPELINE_TIMEOUT_SECONDS 0 86400
 Require-Number AI_MAX_OUTPUT_TOKENS 128 4096 | Out-Null
-if ([int]$values.AI_PIPELINE_TIMEOUT_SECONDS -le [int]$values.AI_PROVIDER_TIMEOUT_SECONDS) { throw "AI_PIPELINE_TIMEOUT_SECONDS must exceed AI_PROVIDER_TIMEOUT_SECONDS" }
+if ($pipelineTimeout -gt 0 -and $pipelineTimeout -le [int]$values.AI_PROVIDER_TIMEOUT_SECONDS) { throw "AI_PIPELINE_TIMEOUT_SECONDS must be 0 (unlimited) or exceed AI_PROVIDER_TIMEOUT_SECONDS" }
 if ($values.ALLOW_PROGRAMMATIC_FALLBACK.ToLowerInvariant() -notin @("true", "false")) { throw "ALLOW_PROGRAMMATIC_FALLBACK must be true or false" }
 
 $localEnabled = $values.ENABLE_LOCAL_LLM.ToLowerInvariant()
@@ -149,12 +151,14 @@ if ($localEnabled -eq "true") {
     Invoke-Compose exec -T ai-driver python -c "from backend.model_availability import verify_local_inference; raise SystemExit(0 if verify_local_inference() else 1)"
 }
 function Remove-SmokeUsers {
-    Invoke-Compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DELETE FROM users WHERE email LIKE \$\$smoke-%@example.test\$\$;"' | Out-Null
+    "DELETE FROM users WHERE email LIKE 'smoke-%@example.test';" |
+        & docker compose --env-file .env @profile exec -T postgres psql -U $values.DB_USER -d $values.DB_NAME -v ON_ERROR_STOP=1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Smoke user cleanup failed" }
 }
 $smokeArgs = @("--base-url", "http://frontend:8080")
 if (-not $values.ENABLED_MODELS) { $smokeArgs += "--expect-no-ai" }
 Remove-SmokeUsers
-Get-Content -Raw (Join-Path $PSScriptRoot "scripts/smoke_stack.py") |
+Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot "scripts/smoke_stack.py") |
     & docker compose --env-file .env @profile exec -T ai-driver python - @smokeArgs
 $smokeExitCode = $LASTEXITCODE
 Remove-SmokeUsers

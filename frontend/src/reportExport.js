@@ -1,9 +1,6 @@
-﻿import verdanaBoldUrl from "./assets/fonts/Verdana-Bold.ttf?url";
+import verdanaBoldUrl from "./assets/fonts/Verdana-Bold.ttf?url";
 import verdanaUrl from "./assets/fonts/Verdana.ttf?url";
 
-const BRAND_GREEN = [47, 111, 101];
-const SOFT_GREEN = [229, 242, 236];
-const TEXT_COLOR = [30, 41, 38];
 const PDF_FONT = "Verdana";
 
 const formatExportDate = () =>
@@ -25,6 +22,11 @@ const normalizeRows = (report) => ({
   errors: Array.isArray(report.errors) ? report.errors : [],
   recommendations: Array.isArray(report.recommendations) ? report.recommendations : [],
 });
+
+const reportNotes = (report) => [
+  ...(report.result?.data_notes || []).map((text) => ["Учёт данных", text]),
+  ...(report.result?.limitations || []).map((text) => ["Ограничение", text]),
+];
 
 const arrayBufferToBase64 = (buffer) => {
   const bytes = new Uint8Array(buffer);
@@ -54,107 +56,14 @@ const registerPdfFonts = async (doc) => {
 };
 
 export async function exportReportToPdf(report) {
-  const [{ jsPDF }, autoTableModule] = await Promise.all([
-    import("jspdf"),
-    import("jspdf-autotable"),
+  const [{ jsPDF }, { default: autoTable }, { drawReportPdf }] = await Promise.all([
+    import("jspdf"), import("jspdf-autotable"), import("./reportPdf.js"),
   ]);
-  const autoTable = autoTableModule.default;
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
   await registerPdfFonts(doc);
-  const { errors, recommendations } = normalizeRows(report);
-  const exportDate = formatExportDate();
-
-  doc.setFillColor(...SOFT_GREEN);
-  doc.rect(0, 0, 210, 32, "F");
-  doc.setTextColor(...BRAND_GREEN);
-  doc.setFont(PDF_FONT, "bold");
-  doc.setFontSize(18);
-  doc.text("НейроЭксперт", 14, 15);
-
-  doc.setTextColor(...TEXT_COLOR);
-  doc.setFontSize(11);
-  doc.setFont(PDF_FONT, "normal");
-  doc.text(`Дата экспорта: ${exportDate}`, 14, 24);
-
-  doc.setFont(PDF_FONT, "bold");
-  doc.setFontSize(15);
-  doc.text(report.course || "Электронный курс", 14, 44, { maxWidth: 182 });
-
-  doc.setFont(PDF_FONT, "normal");
-  doc.setFontSize(12);
-  doc.text(report.title || "Отчет без названия", 14, 54, { maxWidth: 182 });
-
-  autoTable(doc, {
-    startY: 68,
-    head: [["Приоритет", "Процент", "Вопрос", "Описание"]],
-    body: errors.length
-      ? errors.map((error) => [
-          error.priority || "",
-          error.val || "",
-          error.question || "",
-          error.text || "",
-        ])
-      : [["", "", "", "Критичные массовые ошибки не указаны."]],
-    styles: {
-      font: PDF_FONT,
-      fontSize: 9,
-      cellPadding: 2.5,
-      textColor: TEXT_COLOR,
-      overflow: "linebreak",
-    },
-    headStyles: {
-      fillColor: BRAND_GREEN,
-      textColor: [255, 255, 255],
-      fontStyle: "bold",
-    },
-    alternateRowStyles: {
-      fillColor: [247, 248, 246],
-    },
-    columnStyles: {
-      0: { cellWidth: 24 },
-      1: { cellWidth: 22 },
-      2: { cellWidth: 42 },
-      3: { cellWidth: 94 },
-    },
-    margin: { left: 14, right: 14 },
-  });
-
-  const recommendationsStartY = (doc.lastAutoTable?.finalY || 78) + 12;
-  doc.setFont(PDF_FONT, "bold");
-  doc.setFontSize(13);
-  doc.text("Рекомендации", 14, recommendationsStartY);
-
-  autoTable(doc, {
-    startY: recommendationsStartY + 6,
-    head: [["#", "Рекомендация"]],
-    body: recommendations.length
-      ? recommendations.map((recommendation, index) => [index + 1, recommendation])
-      : [["", "Рекомендации не указаны."]],
-    styles: {
-      font: PDF_FONT,
-      fontSize: 9,
-      cellPadding: 2.5,
-      textColor: TEXT_COLOR,
-      overflow: "linebreak",
-    },
-    headStyles: {
-      fillColor: BRAND_GREEN,
-      textColor: [255, 255, 255],
-      fontStyle: "bold",
-    },
-    alternateRowStyles: {
-      fillColor: [247, 248, 246],
-    },
-    columnStyles: {
-      0: { cellWidth: 14 },
-      1: { cellWidth: 168 },
-    },
-    margin: { left: 14, right: 14 },
-  });
-
+  drawReportPdf(doc, autoTable, report);
   doc.save(safeFileName(report.course, "pdf"));
 }
-
 const downloadBlob = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -203,6 +112,7 @@ export async function exportReportToXlsx(report) {
     { field: "Заголовок отчета", value: report.title || "Отчет без названия" },
     { field: "Статус", value: report.status || "Completed" },
     { field: "Дата экспорта", value: exportDate },
+    ...reportNotes(report).map(([field, value]) => ({ field, value })),
   ]);
 
   const errorsSheet = workbook.addWorksheet("Errors");
@@ -264,6 +174,7 @@ export function exportReportToCsv(report) {
     ["Report title", report.title || "Отчет без названия"],
     ["Status", report.status || "Completed"],
     ["Export date", exportDate],
+    ...reportNotes(report),
     [],
     ["Errors"],
     ["Priority", "Percent", "Question", "Description"],

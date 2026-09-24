@@ -35,10 +35,16 @@ make down     # остановка
 | --- | --- | --- |
 | Без AI | `./deploy.sh` | ничего; секреты генерируются автоматически |
 | Облачный AI | `./deploy.sh` | ключ provider и его id в `ENABLED_MODELS` |
-| Managed local LLM | `./deploy.sh` | GGUF-каталог, SHA-256, `ENABLE_LOCAL_LLM=true`, `local_llm` |
-| External local LLM | `./deploy.sh` | OpenAI-compatible `/v1`, model id, `LOCAL_LLM_MODE=external` |
+| Managed local LLM | `./deploy.sh --local-ai` | GGUF-файл или HTTPS URL, SHA-256, `LOCAL_LLM_MODE=managed` |
+| External local LLM | `./deploy.sh --local-ai` | OpenAI-compatible `/v1`, model id, `LOCAL_LLM_MODE=external` |
 | Только UI/demo | `make up-demo` | ничего, данные хранятся в браузере |
 | Локальная разработка | см. `DEVELOPER_GUIDE.md` | Node.js, .NET 9, Python 3.11+ |
+
+Флаг `--local-ai` сохраняет `ENABLE_LOCAL_LLM=true` и добавляет `local_llm` в
+`ENABLED_MODELS` в `.env` (либо в файле `DEPLOY_ENV_FILE`). Остальные провайдеры
+сохраняются. Флаг не выбирает и не скачивает модель автоматически: для managed
+режима нужны GGUF-файл или `LOCAL_LLM_MODEL_URL` и `LOCAL_LLM_MODEL_SHA256`.
+В Windows-скрипте эти параметры задаются вручную в `.env`.
 
 Demo-режим предназначен для показа интерфейса и не выполняет настоящий анализ.
 Программный fallback AI-driver отключён по умолчанию: сбой провайдера виден как
@@ -79,6 +85,7 @@ python3 scripts/analysis_e2e.py \
 
 - [USER_GUIDE.md](USER_GUIDE.md) — работа преподавателя;
 - [ADMIN_GUIDE.md](ADMIN_GUIDE.md) — production deployment и эксплуатация;
+- [LOCAL_MODEL_RUNBOOK.md](LOCAL_MODEL_RUNBOOK.md) — запуск Qwen3-1.7B на порту 3000;
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — локальная разработка и тесты.
 - [RELEASE_GATE.md](RELEASE_GATE.md) — обязательный production release gate.
 - [CUSTOMER_ACCEPTANCE_HANDOFF_RU.md](CUSTOMER_ACCEPTANCE_HANDOFF_RU.md) —

@@ -1,15 +1,37 @@
 using ApiCore.Services;
 using System.Text.Json;
 
+if (args.SequenceEqual(new[] { "--self-test" })) return ParserRegression.Run();
 var jsonMode = args.Length == 3 && args[0] == "--json";
-var paths = jsonMode ? args.Skip(1).ToArray() : args;
+var payloadMode = args.Length == 3 && args[0] == "--payload";
+var pdfMode = args.Length == 3 && args[0] == "--pdf-data";
+var paths = jsonMode || payloadMode || pdfMode ? args.Skip(1).ToArray() : args;
 if (paths.Length != 2)
 {
-    Console.Error.WriteLine("Usage: ParserSmoke [--json] <benchmark> <student-responses>");
+    Console.Error.WriteLine("Usage: ParserSmoke [--json|--payload] <benchmark> <student-responses>, or --self-test");
     return 2;
 }
 
-var payload = new FileParser().ParseToBatchRequest(paths[0], [paths[1]]);
+ApiCore.Models.CourseBatchAnalysisRequest payload;
+try
+{
+    payload = new FileParser().ParseToBatchRequest(paths[0], [paths[1]]);
+}
+catch (InvalidDataException error)
+{
+    Console.Error.WriteLine(error.Message);
+    return 1;
+}
+if (payloadMode)
+{
+    Console.WriteLine(JsonSerializer.Serialize(payload));
+    return 0;
+}
+if (pdfMode)
+{
+    Console.WriteLine(JsonSerializer.Serialize(PdfReportDataBuilder.Build(payload)));
+    return 0;
+}
 if (payload.Tests.Count == 0)
     throw new InvalidDataException("No tests were parsed.");
 
@@ -40,7 +62,7 @@ if (jsonMode)
             .Where(answer => answer.QuestionId == question.QuestionId).ToList();
         if (answers.Count == 0) return (double?)null;
         var failed = answers.Count(answer => !answer.IsCorrectByLms);
-        var rate = Math.Round(failed * 100.0 / answers.Count, 1);
+        var rate = failed * 100.0 / answers.Count;
         return rate >= 40.0 ? rate : null;
     })).Where(rate => rate.HasValue).Select(rate => rate!.Value).ToList();
     Console.WriteLine(JsonSerializer.Serialize(new
@@ -54,6 +76,8 @@ if (jsonMode)
         students = payload.Tests.SelectMany(test => test.StudentAttempts)
             .Select(attempt => attempt.StudentId).Distinct().ToList(),
         critical_rates = criticalRates,
+        warnings = payload.InputWarnings,
+        data_notes = payload.DataNotes,
     }));
     return 0;
 }

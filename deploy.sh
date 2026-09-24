@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+fail() { echo "ERROR: $*" >&2; exit 1; }
+usage() {
+  cat <<'EOF'
+Usage: ./deploy.sh [--local-ai] [--help]
+
+  --local-ai  Enable the local provider and add local_llm to ENABLED_MODELS
+              in the deployment env file. Keep the configured LOCAL_LLM_MODE.
+              Managed mode requires a GGUF file (or HTTPS URL) and SHA-256;
+              external mode requires a reachable endpoint and model id.
+  --help      Show this help without changing configuration or starting Docker.
+
+Configuration: .env, or the file selected by DEPLOY_ENV_FILE.
+EOF
+}
+
+enable_local_ai=false
+for arg in "$@"; do
+  case "$arg" in
+    --local-ai) enable_local_ai=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) fail "unknown argument: $arg (see ./deploy.sh --help)" ;;
+  esac
+done
+
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$ROOT_DIR"
 DEPLOY_ENV_FILE=${DEPLOY_ENV_FILE:-.env}
@@ -14,7 +38,28 @@ while IFS='=' read -r key value; do
   esac
 done < "$DEPLOY_ENV_FILE"
 
-fail() { echo "ERROR: $*" >&2; exit 1; }
+if [[ "$enable_local_ai" == true ]]; then
+  ENABLE_LOCAL_LLM=true
+  normalized_models=$(printf '%s' "${ENABLED_MODELS:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+  case ",$normalized_models," in
+    *,local_llm,*) ;;
+    *) ENABLED_MODELS="${ENABLED_MODELS:+$ENABLED_MODELS,}local_llm" ;;
+  esac
+  # Compose prefers exported variables to --env-file; keep both in sync.
+  export ENABLE_LOCAL_LLM ENABLED_MODELS
+  temporary=$(mktemp "$(dirname "$DEPLOY_ENV_FILE")/.ai-checker-env.tmp.XXXXXX")
+  trap 'rm -f "$temporary"' EXIT
+  awk '
+    /^ENABLE_LOCAL_LLM=/ { print "ENABLE_LOCAL_LLM=" ENVIRON["ENABLE_LOCAL_LLM"]; next }
+    /^ENABLED_MODELS=/ { print "ENABLED_MODELS=" ENVIRON["ENABLED_MODELS"]; next }
+    { print }
+  ' "$DEPLOY_ENV_FILE" > "$temporary"
+  chmod 600 "$temporary"
+  mv "$temporary" "$DEPLOY_ENV_FILE"
+  trap - EXIT
+  echo "Local AI enabled in $DEPLOY_ENV_FILE (mode: ${LOCAL_LLM_MODE:-managed})."
+fi
+
 validate_port() {
   [[ "$2" =~ ^[0-9]+$ ]] && (( $2 >= 1 && $2 <= 65535 )) || fail "$1 must be an integer from 1 to 65535"
 }
@@ -34,9 +79,9 @@ validate_number MAX_RESPONSE_FILE_COUNT "${MAX_RESPONSE_FILE_COUNT:-50}" 1 1000
 validate_number ANALYSIS_QUEUE_CAPACITY "${ANALYSIS_QUEUE_CAPACITY:-20}" 1 10000
 validate_number ANALYSIS_MAX_ATTEMPTS "${ANALYSIS_MAX_ATTEMPTS:-3}" 1 10
 validate_number AI_PROVIDER_TIMEOUT_SECONDS "${AI_PROVIDER_TIMEOUT_SECONDS:-360}" 30 900
-validate_number AI_PIPELINE_TIMEOUT_SECONDS "${AI_PIPELINE_TIMEOUT_SECONDS:-1200}" 60 3600
+validate_number AI_PIPELINE_TIMEOUT_SECONDS "${AI_PIPELINE_TIMEOUT_SECONDS:-0}" 0 86400
 validate_number AI_MAX_OUTPUT_TOKENS "${AI_MAX_OUTPUT_TOKENS:-1000}" 128 4096
-(( ${AI_PIPELINE_TIMEOUT_SECONDS:-1200} > ${AI_PROVIDER_TIMEOUT_SECONDS:-360} )) || fail "AI_PIPELINE_TIMEOUT_SECONDS must exceed AI_PROVIDER_TIMEOUT_SECONDS"
+(( ${AI_PIPELINE_TIMEOUT_SECONDS:-0} == 0 || ${AI_PIPELINE_TIMEOUT_SECONDS:-0} > ${AI_PROVIDER_TIMEOUT_SECONDS:-360} )) || fail "AI_PIPELINE_TIMEOUT_SECONDS must be 0 (unlimited) or exceed AI_PROVIDER_TIMEOUT_SECONDS"
 (( ${MAX_FILE_SIZE_MB:-50} <= ${MAX_REQUEST_SIZE_MB:-100} )) || fail "MAX_FILE_SIZE_MB cannot exceed MAX_REQUEST_SIZE_MB"
 fallback=$(printf '%s' "${ALLOW_PROGRAMMATIC_FALLBACK:-false}" | tr '[:upper:]' '[:lower:]')
 [[ "$fallback" == true || "$fallback" == false ]] || fail "ALLOW_PROGRAMMATIC_FALLBACK must be true or false"
@@ -71,7 +116,7 @@ if [[ "$ENABLE_LOCAL_LLM" == true && "$LOCAL_LLM_MODE" == managed ]]; then
   path="$models_dir/$file"
   [[ "$file" != */* && "$file" != *\\* && "$file" == *.gguf ]] || fail "LOCAL_LLM_MODEL_FILE must be a .gguf basename"
   [[ -n "$models_dir" ]] || fail "LOCAL_LLM_MODELS_DIR cannot be empty"
-  [[ "${LOCAL_LLM_MODEL_SHA256:-}" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "LOCAL_LLM_MODEL_SHA256 is required in managed mode"
+  [[ "${LOCAL_LLM_MODEL_SHA256:-}" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "LOCAL_LLM_MODEL_SHA256 is required in managed mode; set the GGUF SHA-256 in $DEPLOY_ENV_FILE (see ADMIN_GUIDE.md)"
   validate_number LOCAL_LLM_CONTEXT_SIZE "${LOCAL_LLM_CONTEXT_SIZE:-8192}" 512 131072
   validate_number LOCAL_LLM_THREADS "${LOCAL_LLM_THREADS:-8}" 1 256
   validate_number LOCAL_LLM_BATCH_SIZE "${LOCAL_LLM_BATCH_SIZE:-512}" 1 8192

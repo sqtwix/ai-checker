@@ -16,6 +16,13 @@ echo "Host: ${SERVER_HOST:-0.0.0.0}"
 echo "Port: ${SERVER_PORT:-8080}"
 echo "Context size: ${N_CTX:-8192}"
 
+reasoning_args=()
+case "${LOCAL_LLM_DISABLE_THINKING:-}" in
+    true) reasoning_args=(--reasoning off) ;;
+    false|"") ;;
+    *) echo "ERROR: LOCAL_LLM_DISABLE_THINKING must be true, false or empty"; exit 1 ;;
+esac
+
 # Запуск OpenAI-совместимого сервера llama.cpp
 exec /app/llama-server \
     -m "$MODEL_PATH" \
@@ -26,4 +33,5 @@ exec /app/llama-server \
     --threads "${N_THREADS:-8}" \
     --batch-size "${BATCH_SIZE:-512}" \
     --parallel "${PARALLEL:-1}" \
-    --alias "${MODEL_ALIAS:-local-model}"
+    --alias "${MODEL_ALIAS:-local-model}" \
+    "${reasoning_args[@]}"

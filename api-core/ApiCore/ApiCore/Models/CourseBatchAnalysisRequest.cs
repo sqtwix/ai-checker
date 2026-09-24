@@ -16,6 +16,12 @@ public class CourseBatchAnalysisRequest
 
     [JsonPropertyName("tests")]
     public List<AiTestPayloadDto> Tests { get; set; } = new();
+
+    [JsonPropertyName("input_warnings")]
+    public List<string> InputWarnings { get; set; } = new();
+
+    [JsonPropertyName("data_notes")]
+    public List<string> DataNotes { get; set; } = new();
 }
 
 public class AiTestPayloadDto
@@ -47,6 +53,9 @@ public class AiQuestionDto
 
 public class StudentAttemptDto
 {
+    [JsonPropertyName("attempt_id")]
+    public string AttemptId { get; set; } = string.Empty;
+
     [JsonPropertyName("student_id")]
     public string StudentId { get; set; } = string.Empty;
 
@@ -65,6 +74,9 @@ public class StudentAttemptDto
 
 public class AiUserAnswerDto
 {
+    [JsonPropertyName("reference_answer")]
+    public string ReferenceAnswer { get; set; } = string.Empty;
+
     [JsonPropertyName("question_id")]
     public string QuestionId { get; set; } = string.Empty;
 

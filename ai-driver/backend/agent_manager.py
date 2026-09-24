@@ -1,6 +1,8 @@
 ﻿from backend.agent_client import AgentClient
 from backend.agent_factory import AgentFactory
+from backend.cancellation import job_context, AnalysisCancelled
 from backend.agent_client import AgentSemanticError
+from backend.full_analysis import FullAnalysisPipeline
 import json
 import logging
 import os
@@ -32,7 +34,7 @@ class AgentManager:
         try:
             self.agent_factory = agent_factory
             # Загружаем системные промпты для всех специализаций
-            with open(PATH_TO_JSON, "r") as f:
+            with open(PATH_TO_JSON, "r", encoding="utf-8") as f:
                 row_context = f.read()
                 self.system_prompts = json.loads(row_context)
         except Exception as e:
@@ -57,6 +59,10 @@ class AgentManager:
         return self._run_pipeline(input_data, "local_llm")
 
     def _run_pipeline(self, input_data: str, model_type: str) -> str:
+        with job_context(json.loads(input_data).get("batch_id")):
+            return self._run_active_pipeline(input_data, model_type)
+
+    def _run_active_pipeline(self, input_data: str, model_type: str) -> str:
         # Внутренний метод, реализующий последовательный конвейер агентов.
         # Параметры:
         #   input_data - JSON-строка с данными от api-core
@@ -66,9 +72,11 @@ class AgentManager:
 
         try:
             original_data = json.loads(input_data)
+            if model_type in {"local_llm", "qwen_local", "qwen", "local"}:
+                return FullAnalysisPipeline(self.agent_factory).run(original_data, model_type)
             bounded_data = self._build_bounded_model_input(original_data)
             bounded_input = json.dumps(bounded_data, ensure_ascii=False, separators=(",", ":"))
-            context_was_bounded = len(bounded_input) < len(input_data)
+            context_was_bounded = bounded_data != original_data
             if context_was_bounded:
                 logger.info(
                     "[%s] Bounded model context from %s to %s characters",
@@ -165,6 +173,8 @@ class AgentManager:
             logger.info("[%s] Pipeline completed successfully", model_type)
             return json.dumps(final_report, ensure_ascii=False)
 
+        except AnalysisCancelled:
+            raise
         except json.JSONDecodeError as e:
             raise Exception("[%s] Pipeline JSON Error: invalid JSON from agent - %s" % (model_type, str(e)))
         except Exception as e:

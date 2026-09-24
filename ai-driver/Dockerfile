@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN useradd --create-home --uid 10001 ai-driver && chown -R ai-driver:ai-driver /app
+RUN useradd --create-home --uid 10001 ai-driver && mkdir -p /app/checkpoints && chown -R ai-driver:ai-driver /app
 USER ai-driver
 
 EXPOSE 8000
